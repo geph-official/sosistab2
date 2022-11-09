@@ -1,11 +1,11 @@
 [package]
 name = "sosistab2"
-version = "0.4.45"
+version = "0.1.0"
 authors = ["nullchinchilla <nullchinchilla@pm.me>", "Geph Project <contact@geph.io"]
 edition = "2018"
 description="An obfuscated datagram transport for horrible networks"
 license="MPL-2.0"
-repository="https://github.com/geph-official/sosistab"
+repository="https://github.com/geph-official/sosistab2"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
