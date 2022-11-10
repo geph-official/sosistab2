@@ -24,13 +24,13 @@ fn main() {
             }
         })
         .detach();
-        let size = 65536;
+        let size = 1000;
         let to_send = Bytes::from(vec![0u8; size]);
         let start = Instant::now();
         let mut conn = alice_mux.open_conn(None).await.unwrap();
         for count in 0.. {
             conn.send_urel(to_send.clone()).await.unwrap();
-            if count % 100 == 0 {
+            if count % 1000 == 0 {
                 let rate = count as f64 / start.elapsed().as_secs_f64();
                 eprintln!(
                     "{:.2} pps / {:.2} MiB/s / {:.2} Gbps",
