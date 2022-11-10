@@ -75,6 +75,7 @@ stdcode = "0.1.13"
 arrayref = "0.3.6"
 async-timer = "0.7.4"
 futures-timer = "3.0.2"
+tachyonix = "0.2.0"
 # sliding_extrema = "0.1.4"
 
 [profile.dev]

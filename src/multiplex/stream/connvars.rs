@@ -374,11 +374,11 @@ impl ConnVars {
             .pending_unless(first_retrans.is_some() && can_retransmit);
 
         write_urel
-            .or(new_pkt)
             .or(rto_timeout
                 .or(retransmit)
                 .or(ack_timer)
                 .or(final_timeout)
+                .or(new_pkt)
                 .or(new_write))
             .await
     }

@@ -24,7 +24,7 @@ fn main() {
             }
         })
         .detach();
-        let size = 1024;
+        let size = 65536;
         let to_send = Bytes::from(vec![0u8; size]);
         let start = Instant::now();
         let mut conn = alice_mux.open_conn(None).await.unwrap();

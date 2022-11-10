@@ -20,7 +20,8 @@ pub async fn fastsleep(dur: Duration) {
 
 /// High performance sleep until
 pub async fn fastsleep_until(at: Instant) {
-    Lazy::force(&TIMER_THREAD);
+    // smol::Timer::at(at).await;
+
     // yield once so that if this future isn't polled we don't do anything
     smol::future::yield_now().await;
     let target_uptime_ms = at.saturating_duration_since(*START).as_millis() as u64;
@@ -37,7 +38,8 @@ pub async fn fastsleep_until(at: Instant) {
         }
     };
     if let Some(val) = evt {
-        val.wait().await
+        TIMER_THREAD.thread().unpark();
+        val.wait().await;
     }
 }
 
@@ -58,7 +60,7 @@ static TIMER_THREAD: Lazy<JoinHandle<()>> = Lazy::new(|| {
                 let current_uptime = now.saturating_duration_since(start).as_millis() as u64;
                 CURR_UPTIME_MS.store(current_uptime, Ordering::SeqCst);
                 // wake up everything before this
-                {
+                let to_park = {
                     let notifiers = NOTIFIERS.write();
                     while notified_up_to <= current_uptime {
                         if let Some((_, handle)) = notifiers.remove(&notified_up_to) {
@@ -66,8 +68,13 @@ static TIMER_THREAD: Lazy<JoinHandle<()>> = Lazy::new(|| {
                         }
                         notified_up_to += 1;
                     }
+                    notifiers.is_empty()
+                };
+                if to_park {
+                    std::thread::park()
+                } else {
+                    std::thread::sleep(Duration::from_millis(5));
                 }
-                std::thread::sleep(Duration::from_millis(1));
             }
         })
         .unwrap()

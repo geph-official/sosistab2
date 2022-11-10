@@ -52,36 +52,36 @@ impl NonObfsAead {
         output.extend_from_slice(msg);
 
         // now we overwrite it
-        self.key
-            .seal_in_place_append_tag(
-                Nonce::assume_unique_for_key(bnonce),
-                Aad::empty(),
-                &mut output,
-            )
-            .unwrap();
+        // self.key
+        //     .seal_in_place_append_tag(
+        //         Nonce::assume_unique_for_key(bnonce),
+        //         Aad::empty(),
+        //         &mut output,
+        //     )
+        //     .unwrap();
         output.extend_from_slice(&bnonce);
         (nonce, output.into())
     }
 
     /// Decrypts a message.
     pub fn decrypt(&self, ctext: &[u8]) -> Result<(u64, Bytes), AeadError> {
-        if ctext.len() < 8 + CHACHA20_POLY1305.tag_len() {
-            return Err(AeadError::BadLength);
-        }
+        // if ctext.len() < 8 + CHACHA20_POLY1305.tag_len() {
+        //     return Err(AeadError::BadLength);
+        // }
         // nonce is last 12 bytes
         let (cytext, nonce) = ctext.split_at(ctext.len() - 12);
         // we now open
         let mut ctext = cytext.to_vec();
-        self.key
-            .open_in_place(
-                Nonce::try_assume_unique_for_key(&nonce).unwrap(),
-                Aad::empty(),
-                &mut ctext,
-            )
-            .ok()
-            .ok_or(AeadError::DecryptionFailure)?;
-        let truncate_to = ctext.len() - CHACHA20_POLY1305.tag_len();
-        ctext.truncate(truncate_to);
+        // self.key
+        //     .open_in_place(
+        //         Nonce::try_assume_unique_for_key(&nonce).unwrap(),
+        //         Aad::empty(),
+        //         &mut ctext,
+        //     )
+        //     .ok()
+        //     .ok_or(AeadError::DecryptionFailure)?;
+        // let truncate_to = ctext.len() - CHACHA20_POLY1305.tag_len();
+        // ctext.truncate(truncate_to);
         let nonce = u64::from_le_bytes(*array_ref![nonce, 0, 8]);
         Ok((nonce, ctext.into()))
     }
