@@ -18,20 +18,18 @@ use smol::{
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead, CLIENT_DN_KEY, CLIENT_UP_KEY},
     pipe::Pipe,
+    utilities::sockets::new_udp_socket_bind,
 };
 
 use super::frame::{HandshakeFrame, PipeFrame};
 
 /// Establishes a pipe to the server_addr.
 pub async fn connect(
-    local_port: u16,
     server_addr: SocketAddr,
     server_pk: x25519_dalek::PublicKey,
 ) -> anyhow::Result<Pipe> {
-    let addr = format!("127.0.0.1:{local_port}");
-    let socket = UdpSocket::bind(addr)
-        .await
-        .context("could not bind udp socket")?;
+    let socket =
+        new_udp_socket_bind("0.0.0.0:0".parse().unwrap()).context("could not bind udp socket")?;
     socket
         .connect(server_addr)
         .await
@@ -73,6 +71,7 @@ pub async fn connect(
         resume_token,
     } = deser_resp
     {
+        log::debug!("***** server hello received, calculating stuff ******");
         // finish off the handshake
         let client_resp =
             init_enc.encrypt(&HandshakeFrame::ClientResume { resume_token }.to_bytes());
@@ -114,15 +113,16 @@ async fn client_loop(
     loop {
         let fal = async {
             let msg = recv_upcoded.recv().await?;
-            log::debug!("RECEIVED SERVERBOUND MSG: {:?}", msg);
+            // log::debug!("serverbound: {:?}", msg);
             let msg = bincode::serialize(&msg)?;
             let enc_msg = enc.encrypt(&msg);
             socket.send(&enc_msg).await?;
             anyhow::Ok(())
         }
         .race(async {
-            let mut buf = [0u8; 2048];
+            let mut buf = [0u8; 65536];
             let n = socket.recv(&mut buf).await?;
+            log::trace!("got {} bytes from server", n);
             let dn_msg = &buf[..n];
             let dec_msg = dec.decrypt(dn_msg)?;
 

@@ -198,7 +198,7 @@ async fn pipe_loop(
                     }
                 } // send ack request
                 Event::FecTimeout(parity_frames) => {
-                    tracing::trace!("FecTimeout; sending {} parities", parity_frames.len());
+                    log::trace!("FecTimeout; sending {} parities", parity_frames.len());
                     for parity_frame in parity_frames {
                         let _ = send_upcoded.send(parity_frame).await;
                     }

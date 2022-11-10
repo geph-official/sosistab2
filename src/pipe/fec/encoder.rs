@@ -94,7 +94,6 @@ pub struct FrameEncoder {
 
 impl FrameEncoder {
     /// Creates a new Encoder at the given loss level.
-    #[tracing::instrument(level = "trace")]
     pub fn new(target_loss: u8) -> Self {
         FrameEncoder {
             rate_table: FxHashMap::default(),
@@ -103,7 +102,6 @@ impl FrameEncoder {
     }
 
     /// Encodes a slice of packets into more packets.
-    #[tracing::instrument(level = "trace", skip(pkts))]
     pub fn encode(&mut self, measured_loss: f64, pkts: &[Bytes]) -> Vec<Bytes> {
         // max length
         let max_length = pkts.iter().map(|v| v.len()).max().unwrap();
@@ -113,7 +111,7 @@ impl FrameEncoder {
         // then we get an encoder for this size
         let data_shards = pkts.len();
         let parity_shards = self.repair_len(measured_loss, pkts.len());
-        // tracing::debug!("encoding {},{}", data_shards, parity_shards);
+        // log::debug!("encoding {},{}", data_shards, parity_shards);
 
         // then we encode
         // prepare the space for in-place mutation
@@ -122,7 +120,7 @@ impl FrameEncoder {
         for r in parity_shard_space.iter_mut() {
             padded_pkts.push(r);
         }
-        // tracing::debug!(
+        // log::debug!(
         //     "{:.1}% => {}/{}",
         //     100.0 * measured_loss as f64 / 256.0,
         //     data_shards,

@@ -226,15 +226,15 @@ mod tests {
         smolscale::block_on(async {
             let res: anyhow::Result<()> = async {
                 // spin up the server
-                let socket = UdpSocket::bind("127.0.0.1:33400").await?;
+
                 let server_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
                 let server_pk: x25519_dalek::PublicKey = (&server_sk).into();
-                let listener = Listener::new(socket, server_pk, server_sk);
+                let listener = Listener::new("127.0.0.1:33400".parse()?, server_sk);
                 println!("created listener!");
 
                 // connect
                 let server_addr = "127.0.0.1:33400".parse()?;
-                let client_pipe = connect(33401, server_addr, server_pk)
+                let client_pipe = connect(server_addr, server_pk)
                     .await
                     .context("could not create client_pipe")?;
                 let server_pipe = listener

@@ -73,7 +73,7 @@ static TIMER_THREAD: Lazy<JoinHandle<()>> = Lazy::new(|| {
                 if to_park {
                     std::thread::park()
                 } else {
-                    std::thread::sleep(Duration::from_millis(5));
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
         })

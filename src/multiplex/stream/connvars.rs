@@ -60,7 +60,7 @@ impl Default for ConnVars {
             last_loss: None,
             // cc: Box::new(Cubic::new(0.7, 0.4)),
             cc: Box::new(Highspeed::new(1)),
-            // cc: Box::new(Trivial::new(00)),
+            // cc: Box::new(Trivial::new(8)),
         }
     }
 }
@@ -109,12 +109,12 @@ impl ConnVars {
                 Ok(())
             }
             Ok(ConnVarEvt::Rto(seqno)) => {
-                tracing::debug!(
+                log::debug!(
                     "RTO with {:?}, min {:?}",
                     self.inflight.rto(),
                     self.inflight.min_rtt()
                 );
-                tracing::debug!(
+                log::debug!(
                     "** MARKING LOST {} (unacked = {}, inflight = {}, cwnd = {}, BDP = {}, lost_count = {}, lmf = {}) **",
                     seqno,
                     self.inflight.unacked(),
@@ -159,7 +159,7 @@ impl ConnVars {
             })) => {
                 assert_eq!(self.inflight.lost_count(), self.lost_seqnos.len());
                 let seqnos = stdcode::deserialize::<Vec<Seqno>>(&payload)?;
-                // tracing::trace!("new ACK pkt with {} seqnos", seqnos.len());
+                // log::trace!("new ACK pkt with {} seqnos", seqnos.len());
                 for _ in 0..self.inflight.mark_acked_lt(seqno) {
                     self.cc.mark_ack(
                         self.inflight.bdp(),
@@ -187,7 +187,7 @@ impl ConnVars {
                 payload,
                 ..
             })) => {
-                tracing::trace!("new data pkt with seqno={}", seqno);
+                log::trace!("new data pkt with seqno={}", seqno);
                 if self.delayed_ack_timer.is_none() {
                     self.delayed_ack_timer = Instant::now().checked_add(Duration::from_millis(1));
                 }
@@ -218,7 +218,7 @@ impl ConnVars {
             }
             Ok(ConnVarEvt::NewWrite(bts)) => {
                 assert!(bts.len() <= MSS);
-                tracing::trace!("sending write of length {}", bts.len());
+                log::trace!("sending write of length {}", bts.len());
                 // self.limiter.wait(implied_rate).await;
                 let seqno = self.next_free_seqno;
                 self.next_free_seqno += 1;
@@ -242,7 +242,7 @@ impl ConnVars {
                 ack_seqnos.sort_unstable();
                 let encoded_acks = stdcode::serialize(&ack_seqnos).unwrap();
                 if encoded_acks.len() > 1000 {
-                    tracing::warn!("encoded_acks {} bytes", encoded_acks.len());
+                    log::warn!("encoded_acks {} bytes", encoded_acks.len());
                 }
                 transmit
                     .send(Message::Rel {
@@ -259,11 +259,11 @@ impl ConnVars {
                 Ok(())
             }
             Err(err) => {
-                tracing::debug!("forced to RESET due to {:?}", err);
+                log::debug!("forced to RESET due to {:?}", err);
                 anyhow::bail!(err);
             }
             evt => {
-                tracing::debug!("unrecognized event: {:#?}", evt);
+                log::debug!("unrecognized event: {:#?}", evt);
                 Ok(())
             }
         }

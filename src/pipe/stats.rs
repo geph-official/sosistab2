@@ -49,7 +49,7 @@ impl StatsCalculator {
     /// Calculates stats based on data from the last 60 seconds
     pub fn get_stats(&self) -> PipeStats {
         if let Some((utime, stat)) = self.cached_stat.read().as_ref() {
-            if utime.elapsed() < Duration::from_secs(1) {
+            if utime.elapsed() < Duration::from_secs(60) {
                 return *stat;
             }
         }

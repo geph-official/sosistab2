@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use dashmap::DashMap;
+use futures_util::future::select_all;
 use rand::prelude::*;
 
 use smol::channel::{Receiver, Sender};
@@ -41,10 +42,10 @@ pub async fn multiplex(
     let reap_dead = {
         let dead_send = dead_send.clone();
         move |id: u16| {
-            tracing::debug!("reaper received {}", id);
+            log::debug!("reaper received {}", id);
             smolscale::spawn(async move {
                 smol::Timer::after(Duration::from_secs(30)).await;
-                tracing::debug!("reaper executed {}", id);
+                log::debug!("reaper executed {}", id);
                 let _ = dead_send.try_send(id);
             })
             .detach()
@@ -59,6 +60,8 @@ pub async fn multiplex(
         Dead(u16),
     }
 
+    let mut send_dominance = 0.0;
+
     loop {
         // fires on receiving messages
         let recv_msg = async {
@@ -68,7 +71,7 @@ pub async fn multiplex(
             if let Ok(msg) = msg {
                 Ok::<_, anyhow::Error>(Event::RecvMsg(msg))
             } else {
-                tracing::trace!("unrecognizable message from sess: {:?}", raw_msg);
+                log::trace!("unrecognizable message from sess: {:?}", raw_msg);
                 smol::future::pending().await
             }
         };
@@ -121,7 +124,7 @@ pub async fn multiplex(
                             return;
                         }
                     };
-                    tracing::trace!("conn open send {}", stream_id);
+                    log::trace!("conn open send {}", stream_id);
                     drop({
                         glob_send
                             .send(Message::Rel {
@@ -209,7 +212,7 @@ pub async fn multiplex(
                                     log::warn!("failed decrypting {} bytes: {:?}", inner.len(), err)
                                 }
                                 Ok((nonce, plain)) => {
-                                    log::debug!("decrypted {} bytes, nonce {nonce}", plain.len());
+                                    log::trace!("decrypted {} bytes, nonce {nonce}", plain.len());
                                     if replay_filter.add(nonce) {
                                         if let Ok(msg) = stdcode::deserialize::<Message>(&plain) {
                                             match msg {
@@ -231,7 +234,7 @@ pub async fn multiplex(
                                                     ..
                                                 } => {
                                                     if conn_tab.get_stream(stream_id).is_some() {
-                                                        tracing::trace!(
+                                                        log::trace!(
                                                             "syn recv {} REACCEPT",
                                                             stream_id
                                                         );
@@ -243,7 +246,7 @@ pub async fn multiplex(
                                                         };
                                                         let _ = glob_send.try_send(msg);
                                                     } else {
-                                                        tracing::trace!(
+                                                        log::trace!(
                                                             "syn recv {} ACCEPT",
                                                             stream_id
                                                         );
@@ -280,10 +283,10 @@ pub async fn multiplex(
                                                     if let Some(handle) =
                                                         conn_tab.get_stream(stream_id)
                                                     {
-                                                        // tracing::trace!("handing over {:?} to {}", kind, stream_id);
+                                                        // log::trace!("handing over {:?} to {}", kind, stream_id);
                                                         handle.process(msg).await;
                                                     } else {
-                                                        tracing::trace!(
+                                                        log::trace!(
                                                             "discarding {:?} to nonexistent {}",
                                                             kind,
                                                             stream_id
@@ -340,13 +343,13 @@ impl ConnTable {
 
     fn find_id(&self) -> Option<u16> {
         if self.sid_to_stream.len() >= 65535 {
-            tracing::warn!("ran out of descriptors ({})", self.sid_to_stream.len());
+            log::warn!("ran out of descriptors ({})", self.sid_to_stream.len());
             return None;
         }
         loop {
             let possible_id: u16 = rand::thread_rng().gen();
             if self.sid_to_stream.get(&possible_id).is_none() {
-                tracing::debug!(
+                log::debug!(
                     "found id {} out of {}",
                     possible_id,
                     self.sid_to_stream.len()

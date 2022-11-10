@@ -1,7 +1,10 @@
+use std::net::SocketAddr;
+
 use super::listener_table::PipeTable;
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead},
     pipe::{frame::HandshakeFrame, pipe_struct::Pipe},
+    utilities::sockets::new_udp_socket_bind,
 };
 use bytes::Bytes;
 use rand::RngCore;
@@ -18,17 +21,14 @@ pub struct Listener {
 
 impl Listener {
     /// Constructor.
-    pub fn new(
-        socket: UdpSocket,
-        server_long_pk: x25519_dalek::PublicKey,
-        server_long_sk: x25519_dalek::StaticSecret,
-    ) -> Self {
+    pub fn new(listen: SocketAddr, server_long_sk: x25519_dalek::StaticSecret) -> Self {
+        let socket = new_udp_socket_bind(listen).unwrap();
         let (send_new_pipes, recv_new_pipes) = smol::channel::unbounded();
         let task = smolscale::spawn(async move {
             if let Err(err) = listener_loop(
                 socket.clone(),
                 send_new_pipes,
-                server_long_pk,
+                (&server_long_sk).into(),
                 server_long_sk,
             )
             .await
@@ -85,8 +85,7 @@ async fn listener_loop(
                             timestamp,
                         } => {
                             // println!("received ClientHello: {:?}", msg);
-                            let server_eph_sk =
-                                x25519_dalek::StaticSecret::new(rand::thread_rng());
+                            let server_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
 
                             // make token
                             let shared_secret =
@@ -127,7 +126,10 @@ async fn listener_loop(
                                     send_downcoded,
                                     &token_info.sess_key,
                                 );
-                                log::debug!("SERVER shared_secret: {:?}", token_info.sess_key);
+                                log::debug!(
+                                    "SERVER shared_secret: {:?}",
+                                    hex::encode(token_info.sess_key)
+                                );
                                 let pipe =
                                     Pipe::with_custom_transport(recv_downcoded, send_upcoded);
                                 anyhow::Ok(pipe)
@@ -144,6 +146,8 @@ async fn listener_loop(
                         }
                     }
                 };
+            } else {
+                log::warn!("oh no!");
             }
         }
     }

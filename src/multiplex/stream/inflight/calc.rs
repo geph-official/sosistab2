@@ -1,8 +1,4 @@
-use std::{
-    time::{Duration, Instant},
-};
-
-
+use std::time::{Duration, Instant};
 
 use crate::EmaCalculator;
 
@@ -88,7 +84,7 @@ impl BwCalculator {
         {
             self.max_speed = delivery_rate;
         }
-        // tracing::warn!("current rate is {}", self.delivery_rate());
+        // log::warn!("current rate is {}", self.delivery_rate());
     }
 
     /// Gets the current delivery rate

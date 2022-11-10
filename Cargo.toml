@@ -13,7 +13,7 @@ repository="https://github.com/geph-official/sosistab2"
 [dependencies]
 argh= "0.1.7"
 smol= "1.2.5"
-socket2= "0.3"
+socket2 = "0.3"
 x25519-dalek={ version = "1.1.0", features = ["serde"] }
 serde={ version = "1.0.131", features = ["derive", "rc"] }
 # bytes={ version = "1.0.0", features = ["serde"] }
@@ -23,7 +23,7 @@ rand= "0.7"
 constant_time_eq= "0.1.5"
 bincode= "1.3.3"
 event-listener= "2.5.1"
-futures-util= "0.3.18"
+futures-util = "0.3.18"
 parking_lot= "0.11.2"
 # governor= "0.3.1"
 async-dup= "1.2.2"
@@ -76,6 +76,7 @@ arrayref = "0.3.6"
 async-timer = "0.7.4"
 futures-timer = "3.0.2"
 tachyonix = "0.2.0"
+future-utils = "0.12.1"
 # sliding_extrema = "0.1.4"
 
 [profile.dev]

@@ -20,24 +20,26 @@ fn main() {
             let mut conn = bob_mux.accept_conn().await.unwrap();
             let mut buff = [0u8; 65536];
             loop {
-                conn.recv_urel().await.unwrap();
+                conn.read(&mut buff).await.unwrap();
             }
         })
         .detach();
         let size = 1000;
         let to_send = Bytes::from(vec![0u8; size]);
-        let start = Instant::now();
         let mut conn = alice_mux.open_conn(None).await.unwrap();
-        for count in 0.. {
-            conn.send_urel(to_send.clone()).await.unwrap();
-            if count % 1000 == 0 {
-                let rate = count as f64 / start.elapsed().as_secs_f64();
-                eprintln!(
-                    "{:.2} pps / {:.2} MiB/s / {:.2} Gbps",
-                    rate,
-                    rate * (size as f64) / 1024.0 / 1024.0,
-                    rate * (size as f64) / 1000.0 / 1000.0 / 1000.0 * 8.0
-                )
+        loop {
+            let start = Instant::now();
+            for count in 0..100000 {
+                conn.write_all(&to_send).await.unwrap();
+                if count % 10000 == 0 && count != 0 {
+                    let rate = count as f64 / start.elapsed().as_secs_f64();
+                    eprintln!(
+                        "{:.2} pps / {:.2} MiB/s / {:.2} Gbps",
+                        rate,
+                        rate * (size as f64) / 1024.0 / 1024.0,
+                        rate * (size as f64) / 1000.0 / 1000.0 / 1000.0 * 8.0
+                    )
+                }
             }
         }
     })

@@ -118,7 +118,6 @@ impl PipePool {
         v.push((arc_pipe, task))
     }
 
-    #[inline]
     pub async fn send(&self, pkt: Bytes) {
         let v = self.pipes.read().await;
         let best_pipe = v
@@ -132,7 +131,6 @@ impl PipePool {
         }
     }
 
-    #[inline]
     pub async fn recv(&self) -> anyhow::Result<Bytes> {
         let ret = self.recv_incoming.recv().await?;
         Ok(ret)

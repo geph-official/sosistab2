@@ -43,8 +43,8 @@ impl PipeTable {
     ) {
         let up_key = upify_shared_secret(sess_key);
         let dn_key = dnify_shared_secret(sess_key);
-        let encoder = ObfsAead::new(up_key.as_bytes());
-        let decoder = ObfsAead::new(dn_key.as_bytes());
+        let encoder = ObfsAead::new(dn_key.as_bytes());
+        let decoder = ObfsAead::new(up_key.as_bytes());
 
         // start down-forwarding actor
         let task = smolscale::spawn(dn_forward_loop(
@@ -120,6 +120,7 @@ async fn dn_forward_loop(
     let r: anyhow::Result<()> = async {
         loop {
             let msg = recv_upcoded.recv().await?;
+            log::trace!("gonna send down {:?}", msg);
             let ctext = encoder.encrypt(&bincode::serialize(&msg)?);
             socket.send_to(&ctext, client_addr).await?;
         }

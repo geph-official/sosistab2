@@ -117,7 +117,6 @@ pub struct FrameDecoder {
 }
 
 impl FrameDecoder {
-    #[tracing::instrument(level = "trace")]
     pub fn new(data_shards: usize, parity_shards: usize) -> Self {
         FrameDecoder {
             data_shards,
@@ -130,10 +129,9 @@ impl FrameDecoder {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self, pkt))]
     pub fn decode(&mut self, pkt: &[u8], pkt_idx: usize) -> Option<Vec<Bytes>> {
         // if rand::random::<f64>() < 0.1 {
-        //     tracing::debug!("decoding with {}/{}", self.data_shards, self.parity_shards);
+        //     log::debug!("decoding with {}/{}", self.data_shards, self.parity_shards);
         // }
         // if we don't have parity shards, don't touch anything
         if self.parity_shards == 0 {
@@ -141,7 +139,7 @@ impl FrameDecoder {
             return Some(vec![post_decode(Bytes::copy_from_slice(pkt))?]);
         }
         if self.space.is_empty() {
-            tracing::trace!("decode with pad len {}", pkt.len());
+            log::trace!("decode with pad len {}", pkt.len());
             self.space = vec![vec![0u8; pkt.len()]; self.data_shards + self.parity_shards]
         }
         if self.space.len() <= pkt_idx {
@@ -167,7 +165,7 @@ impl FrameDecoder {
             ))?]);
         }
         if self.present_count < self.data_shards {
-            tracing::trace!("don't even attempt yet");
+            log::trace!("don't even attempt yet");
             return None;
         }
         let mut ref_vec: Vec<(&mut [u8], bool)> = self
@@ -177,7 +175,7 @@ impl FrameDecoder {
             .map(|(v, pres)| (v.as_mut(), *pres))
             .collect();
         // otherwise, attempt to reconstruct
-        tracing::trace!(
+        log::trace!(
             "attempting to reconstruct (data={}, parity={})",
             self.data_shards,
             self.parity_shards
