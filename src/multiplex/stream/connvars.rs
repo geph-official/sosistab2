@@ -6,17 +6,18 @@ use std::{
 use bipe::{BipeReader, BipeWriter};
 use bytes::Bytes;
 use rustc_hash::FxHashSet;
-use smol::channel::Receiver;
+use smol::channel::{Receiver, Sender};
 
 use crate::{
     multiplex::{
         stream::congestion::{CongestionControl, Highspeed},
         structs::*,
     },
+    timer::{fastsleep, fastsleep_until},
     utilities::MyFutureExt,
 };
 
-use super::{inflight::Inflight, pacer::Pacer, MSS};
+use super::{inflight::Inflight, MSS};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
@@ -36,8 +37,6 @@ pub(crate) struct ConnVars {
     last_loss: Option<Instant>,
 
     cc: Box<dyn CongestionControl + Send>,
-
-    pacer: Pacer,
 }
 
 impl Default for ConnVars {
@@ -60,7 +59,6 @@ impl Default for ConnVars {
             lost_seqnos: BTreeSet::new(),
             last_loss: None,
             // cc: Box::new(Cubic::new(0.7, 0.4)),
-            pacer: Pacer::new(Duration::from_millis(1)),
             cc: Box::new(Highspeed::new(1)),
             // cc: Box::new(Trivial::new(00)),
         }
@@ -75,6 +73,7 @@ enum ConnVarEvt {
     Retransmit(Seqno),
     AckTimer,
     NewWrite(Bytes),
+    NewWriteUrel(Bytes),
     NewPkt(Message),
     Closing,
 }
@@ -85,23 +84,21 @@ impl ConnVars {
         &mut self,
         stream_id: u16,
         recv_write: &mut BipeReader,
+        recv_write_urel: &Receiver<Bytes>,
         send_read: &mut BipeWriter,
+        send_read_urel: &Sender<Bytes>,
         recv_wire_read: &Receiver<Message>,
-        transmit: impl Fn(Message),
+        transmit: &Sender<Message>,
     ) -> anyhow::Result<()> {
         assert_eq!(self.inflight.lost_count(), self.lost_seqnos.len());
-        match self.next_event(recv_write, recv_wire_read).await {
+        match self
+            .next_event(recv_write, recv_wire_read, recv_write_urel)
+            .await
+        {
             Ok(ConnVarEvt::Retransmit(seqno)) => {
                 if let Some(msg) = self.inflight.retransmit(seqno) {
                     self.lost_seqnos.remove(&seqno);
-                    // tracing::debug!(
-                    //     "** RETRANSMIT {} (inflight = {}, cwnd = {}, lost_count = {}) **",
-                    //     seqno,
-                    //     self.inflight.inflight(),
-                    //     self.cc.cwnd(),
-                    //     self.inflight.lost_count(),
-                    // );
-                    transmit(msg);
+                    transmit.send(msg).await?;
                 }
                 assert_eq!(self.inflight.lost_count(), self.lost_seqnos.len());
                 Ok(())
@@ -142,6 +139,13 @@ impl ConnVars {
                 self.inflight.mark_lost(seqno);
                 self.lost_seqnos.insert(seqno);
                 assert_eq!(self.inflight.lost_count(), self.lost_seqnos.len());
+                Ok(())
+            }
+            Ok(ConnVarEvt::NewPkt(Message::Urel {
+                stream_id: _,
+                payload,
+            })) => {
+                let _ = send_read_urel.send(payload).await;
                 Ok(())
             }
             Ok(ConnVarEvt::NewPkt(Message::Rel {
@@ -203,6 +207,15 @@ impl ConnVars {
                     anyhow::bail!("cannot write into send_read")
                 }
             }
+            Ok(ConnVarEvt::NewWriteUrel(bts)) => {
+                transmit
+                    .send(Message::Urel {
+                        stream_id,
+                        payload: bts,
+                    })
+                    .await?;
+                Ok(())
+            }
             Ok(ConnVarEvt::NewWrite(bts)) => {
                 assert!(bts.len() <= MSS);
                 tracing::trace!("sending write of length {}", bts.len());
@@ -218,7 +231,7 @@ impl ConnVars {
                 // put msg into inflight
                 self.inflight.insert(seqno, msg.clone());
 
-                transmit(msg);
+                transmit.send(msg).await?;
                 assert_eq!(self.inflight.lost_count(), self.lost_seqnos.len());
                 Ok(())
             }
@@ -227,16 +240,18 @@ impl ConnVars {
                 let mut ack_seqnos: Vec<_> = self.ack_seqnos.iter().collect();
                 assert!(ack_seqnos.len() <= ACK_BATCH);
                 ack_seqnos.sort_unstable();
-                let encoded_acks = bincode::serialize(&ack_seqnos).unwrap();
+                let encoded_acks = stdcode::serialize(&ack_seqnos).unwrap();
                 if encoded_acks.len() > 1000 {
                     tracing::warn!("encoded_acks {} bytes", encoded_acks.len());
                 }
-                transmit(Message::Rel {
-                    kind: RelKind::DataAck,
-                    stream_id,
-                    seqno: self.lowest_unseen,
-                    payload: Bytes::copy_from_slice(&encoded_acks),
-                });
+                transmit
+                    .send(Message::Rel {
+                        kind: RelKind::DataAck,
+                        stream_id,
+                        seqno: self.lowest_unseen,
+                        payload: Bytes::copy_from_slice(&encoded_acks),
+                    })
+                    .await?;
                 self.ack_seqnos.clear();
 
                 self.delayed_ack_timer = None;
@@ -272,17 +287,8 @@ impl ConnVars {
         &mut self,
         recv_write: &mut BipeReader,
         recv_wire_read: &Receiver<Message>,
+        recv_write_urel: &Receiver<Bytes>,
     ) -> anyhow::Result<ConnVarEvt> {
-        smol::future::yield_now().await;
-        // tracing::debug!(
-        //     "** BEFORE EVT: (unacked = {}, inflight = {}, cwnd = {}, lost_count = {}, lost={:?}, rto={:?}) **",
-        //     self.inflight.unacked(),
-        //     self.inflight.inflight(),
-        //     self.cc.cwnd(),
-        //     self.inflight.lost_count(),
-        //     self.lost_seqnos,
-        //     self.inflight.rto()
-        // );
         // There's a rather subtle logic involved here.
         //
         // We want to make sure the *total inflight* is less than cwnd.
@@ -300,13 +306,18 @@ impl ConnVars {
         let force_ack = self.ack_seqnos.len() >= ACK_BATCH;
         assert!(self.ack_seqnos.len() <= ACK_BATCH);
 
+        let write_urel = async {
+            let b = recv_write_urel.recv().await?;
+            anyhow::Ok(ConnVarEvt::NewWriteUrel(b))
+        };
+
         let ack_timer = self.delayed_ack_timer;
         let ack_timer = async {
             if force_ack {
                 return Ok(ConnVarEvt::AckTimer);
             }
             if let Some(time) = ack_timer {
-                smol::Timer::at(time).await;
+                fastsleep_until(time).await;
                 Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::AckTimer)
             } else {
                 smol::future::pending().await
@@ -317,7 +328,7 @@ impl ConnVars {
         let rto_timeout = async move {
             let (rto_seqno, rto_time) = first_rto.unwrap();
             if rto_time > Instant::now() {
-                smol::Timer::at(rto_time).await;
+                fastsleep_until(rto_time).await;
             }
             Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::Rto(rto_seqno))
         }
@@ -346,15 +357,7 @@ impl ConnVars {
                     return Ok(ConnVarEvt::Closing);
                 }
             }
-            let pacing_interval = Duration::from_secs_f64(1.0 / self.pacing_rate());
-            self.pacer.set_interval(pacing_interval);
-            self.pacer.wait_next().await;
-            // if self.next_free_seqno % PACE_BATCH as u64 == 0 {
-            //     smol::Timer::at(self.next_pace_time).await;
-            //     let pacing_interval = Duration::from_secs_f64(1.0 / self.pacing_rate());
-            //     self.next_pace_time =
-            //         Instant::now().max(self.next_pace_time + pacing_interval * PACE_BATCH as u32);
-            // }
+
             Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::NewWrite(
                 self.write_fragments.pop_front().unwrap(),
             ))
@@ -364,22 +367,19 @@ impl ConnVars {
             Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::NewPkt(recv_wire_read.recv().await?))
         };
         let final_timeout = async {
-            smol::Timer::after(Duration::from_secs(600)).await;
-            anyhow::bail!("final timeout within stream actor")
+            fastsleep(Duration::from_secs(600)).await;
+            anyhow::bail!("final timeout within stream actor");
         };
-        let retransmit = async { Ok(ConnVarEvt::Retransmit(first_retrans.unwrap())) }
+        let retransmit = async { anyhow::Ok(ConnVarEvt::Retransmit(first_retrans.unwrap())) }
             .pending_unless(first_retrans.is_some() && can_retransmit);
-        rto_timeout
-            .or(retransmit)
-            .or(ack_timer)
-            .or(final_timeout)
-            .or(new_pkt)
-            .or(new_write)
-            .await
-    }
 
-    fn pacing_rate(&self) -> f64 {
-        // calculate implicit rate
-        (self.cc.cwnd() as f64 / self.inflight.min_rtt().as_secs_f64()).max(100.0)
+        write_urel
+            .or(new_pkt)
+            .or(rto_timeout
+                .or(retransmit)
+                .or(ack_timer)
+                .or(final_timeout)
+                .or(new_write))
+            .await
     }
 }

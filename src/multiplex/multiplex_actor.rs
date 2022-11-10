@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{sync::Arc, time::Duration};
 
 use crate::multiplex::structs::Message;
+use crate::MuxStream;
 use crate::PipePool;
-use crate::Stream;
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
     utilities::ReplayFilter,
@@ -22,8 +22,8 @@ use super::{
 
 pub async fn multiplex(
     pipe_pool: Arc<PipePool>,
-    conn_open_recv: Receiver<(Option<String>, Sender<Stream>)>,
-    conn_accept_send: Sender<Stream>,
+    conn_open_recv: Receiver<(Option<String>, Sender<MuxStream>)>,
+    conn_accept_send: Sender<MuxStream>,
     my_long_sk: x25519_dalek::StaticSecret,
 ) -> anyhow::Result<()> {
     // encryption parameters
@@ -34,7 +34,7 @@ pub async fn multiplex(
     let mut replay_filter = ReplayFilter::default();
 
     let conn_tab = Arc::new(ConnTable::default());
-    let (glob_send, glob_recv) = smol::channel::bounded(1000);
+    let (glob_send, glob_recv) = smol::channel::bounded(100);
     let (dead_send, dead_recv) = smol::channel::unbounded();
 
     // Reap death
@@ -55,23 +55,21 @@ pub async fn multiplex(
     enum Event {
         RecvMsg(OuterMessage),
         SendMsg(Message),
-        ConnOpen(Option<String>, Sender<Stream>),
+        ConnOpen(Option<String>, Sender<MuxStream>),
         Dead(u16),
     }
 
     loop {
         // fires on receiving messages
         let recv_msg = async {
-            let msg = pipe_pool.recv().await?;
+            let raw_msg = pipe_pool.recv().await?;
             // decrypt!
-            let msg = stdcode::deserialize(&msg);
+            let msg = stdcode::deserialize(&raw_msg);
             if let Ok(msg) = msg {
                 Ok::<_, anyhow::Error>(Event::RecvMsg(msg))
             } else {
-                tracing::trace!("unrecognizable message from sess");
-                // In this case, we echo back an empty packet.
-                // Ok(Event::SendMsg(Message::Empty))
-                todo!()
+                tracing::trace!("unrecognizable message from sess: {:?}", raw_msg);
+                smol::future::pending().await
             }
         };
         // fires on sending messages
@@ -101,7 +99,7 @@ pub async fn multiplex(
                         let stream_id = conn_tab.find_id();
                         if let Some(stream_id) = stream_id {
                             let (send_sig, recv_sig) = smol::channel::bounded(1);
-                            let (conn, conn_back) = Stream::new(
+                            let (conn, conn_back) = MuxStream::new(
                                 StreamState::SynSent {
                                     stream_id,
                                     tries: 0,
@@ -143,7 +141,10 @@ pub async fn multiplex(
                 // if outgoing_key is available, encrypt and send off; else drop msg & send ClientHello
                 if let Some(send_aead) = send_aead.as_mut() {
                     let (_, msg) = send_aead.encrypt(&stdcode::serialize(&msg).unwrap());
-                    pipe_pool.send(msg).await;
+                    let outer = OuterMessage::EncryptedMsg { inner: msg };
+                    pipe_pool
+                        .send(stdcode::serialize(&outer).unwrap().into())
+                        .await;
                 } else {
                     log::debug!("no send_aead available, so we send a client hello");
                     let to_send = OuterMessage::ClientHello {
@@ -174,7 +175,7 @@ pub async fn multiplex(
                             &their_long_pk,
                             &their_eph_pk,
                         );
-
+                        log::debug!("recv_secret {:?}", recv_secret);
                         recv_aead = Some(NonObfsAead::new(recv_secret.as_bytes()));
                         log::debug!("recv_aead registered since we received a clienthello");
                         // respond with a serverhello
@@ -196,6 +197,7 @@ pub async fn multiplex(
                             &their_long_pk,
                             &their_eph_pk,
                         );
+                        log::debug!("send_secret {:?}", send_secret);
                         send_aead = Some(NonObfsAead::new(send_secret.as_bytes()));
                         log::debug!("send_aead registered since we received a clienthello");
                     }
@@ -211,6 +213,17 @@ pub async fn multiplex(
                                     if replay_filter.add(nonce) {
                                         if let Ok(msg) = stdcode::deserialize::<Message>(&plain) {
                                             match msg {
+                                                Message::Urel { stream_id, payload } => {
+                                                    if let Some(val) =
+                                                        conn_tab.get_stream(stream_id)
+                                                    {
+                                                        val.process(Message::Urel {
+                                                            stream_id,
+                                                            payload,
+                                                        })
+                                                        .await;
+                                                    }
+                                                }
                                                 Message::Rel {
                                                     kind: RelKind::Syn,
                                                     stream_id,
@@ -243,14 +256,17 @@ pub async fn multiplex(
                                                             Some(lala)
                                                         };
                                                         let reap_dead = reap_dead.clone();
-                                                        let (new_conn, new_conn_back) = Stream::new(
-                                                            StreamState::SynReceived { stream_id },
-                                                            glob_send.clone(),
-                                                            move || {
-                                                                reap_dead(stream_id);
-                                                            },
-                                                            additional_info,
-                                                        );
+                                                        let (new_conn, new_conn_back) =
+                                                            MuxStream::new(
+                                                                StreamState::SynReceived {
+                                                                    stream_id,
+                                                                },
+                                                                glob_send.clone(),
+                                                                move || {
+                                                                    reap_dead(stream_id);
+                                                                },
+                                                                additional_info,
+                                                            );
                                                         // the Stream itself is responsible for sending the SynAck. Here we just store the connection into the table, accept it, and be done with it.
                                                         conn_tab
                                                             .set_stream(stream_id, new_conn_back);
@@ -265,7 +281,7 @@ pub async fn multiplex(
                                                         conn_tab.get_stream(stream_id)
                                                     {
                                                         // tracing::trace!("handing over {:?} to {}", kind, stream_id);
-                                                        handle.process(msg)
+                                                        handle.process(msg).await;
                                                     } else {
                                                         tracing::trace!(
                                                             "discarding {:?} to nonexistent {}",
@@ -279,7 +295,7 @@ pub async fn multiplex(
                                                                 seqno: 0,
                                                                 payload: Bytes::copy_from_slice(&[]),
                                                             };
-                                                            let _ = glob_send.try_send(msg);
+                                                            let _ = glob_send.send(msg).await;
                                                         }
                                                     }
                                                 }

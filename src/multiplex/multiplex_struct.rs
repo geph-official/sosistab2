@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{multiplex::multiplex_actor, pipe::Pipe, Stream};
+use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxStream};
 
 use bytes::Bytes;
 use futures_util::TryFutureExt;
@@ -12,8 +12,8 @@ use smol::{
 /// A multiplex session over a sosistab session, implementing both reliable "streams" and unreliable messages.
 pub struct Multiplex {
     pipe_pool: Arc<PipePool>,
-    conn_open: Sender<(Option<String>, Sender<Stream>)>,
-    conn_accept: Receiver<Stream>,
+    conn_open: Sender<(Option<String>, Sender<MuxStream>)>,
+    conn_accept: Receiver<MuxStream>,
     _task: smol::Task<()>,
 }
 
@@ -47,12 +47,12 @@ impl Multiplex {
     }
 
     /// Adds a Pipe to the Multiplex
-    pub async fn add_pipe(&mut self, pipe: Pipe) {
+    pub async fn add_pipe(&self, pipe: Pipe) {
         self.pipe_pool.add_pipe(pipe).await
     }
 
     /// Open a reliable conn to the other end.
-    pub async fn open_conn(&self, additional: Option<String>) -> std::io::Result<Stream> {
+    pub async fn open_conn(&self, additional: Option<String>) -> std::io::Result<MuxStream> {
         let (send, recv) = smol::channel::unbounded();
         self.conn_open
             .send((additional.clone(), send))
@@ -66,7 +66,7 @@ impl Multiplex {
     }
 
     /// Accept a reliable conn from the other end.
-    pub async fn accept_conn(&self) -> std::io::Result<Stream> {
+    pub async fn accept_conn(&self) -> std::io::Result<MuxStream> {
         self.conn_accept.recv().await.map_err(to_ioerror)
     }
 }
@@ -125,9 +125,10 @@ impl PipePool {
             .map(|(pipe, _)| pipe)
             .enumerate()
             .min_by_key(|(_i, pipe)| pipe.get_stats().score())
-            .map(|t| t.1)
-            .unwrap();
-        best_pipe.send(pkt).await
+            .map(|t| t.1);
+        if let Some(best_pipe) = best_pipe {
+            best_pipe.send(pkt).await
+        }
     }
 
     pub async fn recv(&self) -> anyhow::Result<Bytes> {

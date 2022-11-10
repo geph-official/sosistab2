@@ -108,7 +108,7 @@ impl Inflight {
         }
         let mut sum = 0;
         for seqno in to_remove {
-            sum += if self.mark_acked(seqno) { 1 } else { 0 };
+            sum += usize::from(self.mark_acked(seqno));
         }
         sum
     }

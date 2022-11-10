@@ -1,4 +1,3 @@
-
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -33,6 +32,10 @@ pub enum Message {
         kind: RelKind,
         stream_id: u16,
         seqno: Seqno,
+        payload: Bytes,
+    },
+    Urel {
+        stream_id: u16,
         payload: Bytes,
     },
     Empty,

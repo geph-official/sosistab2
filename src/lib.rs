@@ -1,6 +1,7 @@
-mod crypt;
+pub mod crypt;
 
 mod multiplex;
+mod timer;
 pub use multiplex::*;
 mod pipe;
 

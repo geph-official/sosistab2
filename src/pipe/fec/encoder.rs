@@ -32,6 +32,7 @@ impl FecEncoder {
 
     pub async fn wait_parity(&mut self, loss: f64) -> Vec<PipeFrame> {
         self.timer.wait().await;
+        self.timer.reset();
         if loss == 0.0 {
             self.unfecked.clear();
             smol::future::pending().await
@@ -78,7 +79,6 @@ impl FecEncoder {
                 pad_size,
             })
             .collect();
-        self.timer.reset();
         parity_frames
     }
 }

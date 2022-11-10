@@ -11,35 +11,40 @@ use std::{pin::Pin, sync::Arc, task::Context, task::Poll, time::Duration};
 mod congestion;
 mod connvars;
 mod inflight;
-mod pacer;
 
-pub const MSS: usize = 1100;
+pub const MSS: usize = 1024; // 16K MSS; rely on underlying transport to fragment
 const MAX_WAIT_SECS: u64 = 60;
 
 #[derive(Clone)]
-/// [Stream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
-pub struct Stream {
+/// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
+pub struct MuxStream {
     send_write: DArc<DMutex<BipeWriter>>,
+    send_write_urel: Sender<Bytes>,
     recv_read: DArc<DMutex<BipeReader>>,
+    recv_read_urel: Receiver<Bytes>,
     additional_info: Option<String>,
 }
 
-impl Stream {
+impl MuxStream {
     pub(crate) fn new(
         state: StreamState,
         output: Sender<Message>,
         dropper: impl FnOnce() + Send + 'static,
         additional_info: Option<String>,
     ) -> (Self, StreamBack) {
+        let (send_write_urel, recv_write_urel) = smol::channel::bounded(100);
+        let (send_read_urel, recv_read_urel) = smol::channel::bounded(100);
         let (send_write, recv_write) = bipe::bipe(10);
         let (send_read, recv_read) = bipe::bipe(2000);
-        let (send_wire_read, recv_wire_read) = smol::channel::bounded(1000);
+        let (send_wire_read, recv_wire_read) = smol::channel::bounded(100);
         let aic = additional_info.clone();
         let _task = smolscale::spawn(async move {
             if let Err(e) = stream_actor(
                 state,
                 recv_write,
+                recv_write_urel,
                 send_read,
+                send_read_urel,
                 recv_wire_read,
                 output,
                 aic,
@@ -51,9 +56,11 @@ impl Stream {
             }
         });
         (
-            Stream {
+            MuxStream {
                 send_write: DArc::new(DMutex::new(send_write)),
                 recv_read: DArc::new(DMutex::new(recv_read)),
+                send_write_urel,
+                recv_read_urel,
                 additional_info,
             },
             StreamBack {
@@ -63,16 +70,34 @@ impl Stream {
         )
     }
 
+    /// Returns the "additional info" attached to the stream.
     pub fn additional_info(&self) -> Option<&str> {
         self.additional_info.as_deref()
     }
 
+    /// Shuts down the stream, causing future read and write operations to fail.
     pub async fn shutdown(&mut self) {
         drop(self.send_write.close().await)
     }
+
+    /// Sends an unreliable datagram.
+    pub async fn send_urel(&self, dgram: Bytes) -> std::io::Result<()> {
+        self.send_write_urel
+            .send(dgram)
+            .await
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "cannot send"))
+    }
+
+    /// Receives an unreliable datagram.
+    pub async fn recv_urel(&self) -> std::io::Result<Bytes> {
+        match self.recv_read_urel.recv().await {
+            Ok(val) => Ok(val),
+            Err(err) => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, err)),
+        }
+    }
 }
 
-impl AsyncRead for Stream {
+impl AsyncRead for MuxStream {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -84,7 +109,7 @@ impl AsyncRead for Stream {
     }
 }
 
-impl AsyncWrite for Stream {
+impl AsyncWrite for MuxStream {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -131,27 +156,28 @@ use StreamState::*;
 async fn stream_actor(
     mut state: StreamState,
     mut recv_write: BipeReader,
+    mut recv_write_urel: Receiver<Bytes>,
     mut send_read: BipeWriter,
+    mut send_read_urel: Sender<Bytes>,
     recv_wire_read: Receiver<Message>,
     send_wire_write: Sender<Message>,
     additional_info: Option<String>,
     dropper: impl FnOnce(),
 ) -> anyhow::Result<()> {
     let _guard = scopeguard::guard((), |_| dropper());
-    let transmit = |msg| {
-        let _ = send_wire_write.try_send(msg);
-    };
     loop {
         state = match state {
             SynReceived { stream_id } => {
                 tracing::trace!("C={} SynReceived, sending SYN-ACK", stream_id);
                 // send a synack
-                transmit(Message::Rel {
-                    kind: RelKind::SynAck,
-                    stream_id,
-                    seqno: 0,
-                    payload: Bytes::new(),
-                });
+                send_wire_write
+                    .send(Message::Rel {
+                        kind: RelKind::SynAck,
+                        stream_id,
+                        seqno: 0,
+                        payload: Bytes::new(),
+                    })
+                    .await?;
                 SteadyState {
                     stream_id,
                     conn_vars: Box::new(ConnVars::default()),
@@ -190,17 +216,19 @@ async fn stream_actor(
                     }
                 } else {
                     tracing::trace!("C={} SynSent timed out", stream_id);
-                    transmit(Message::Rel {
-                        kind: RelKind::Syn,
-                        stream_id,
-                        seqno: 0,
-                        payload: Bytes::copy_from_slice(
-                            additional_info
-                                .as_ref()
-                                .unwrap_or(&"".to_string())
-                                .as_bytes(),
-                        ),
-                    });
+                    send_wire_write
+                        .send(Message::Rel {
+                            kind: RelKind::Syn,
+                            stream_id,
+                            seqno: 0,
+                            payload: Bytes::copy_from_slice(
+                                additional_info
+                                    .as_ref()
+                                    .unwrap_or(&"".to_string())
+                                    .as_bytes(),
+                            ),
+                        })
+                        .await?;
                     SynSent {
                         stream_id,
                         tries: tries + 1,
@@ -216,9 +244,11 @@ async fn stream_actor(
                     .process_one(
                         stream_id,
                         &mut recv_write,
+                        &recv_write_urel,
                         &mut send_read,
+                        &send_read_urel,
                         &recv_wire_read,
-                        transmit,
+                        &send_wire_write,
                     )
                     .await
                 {
@@ -240,12 +270,14 @@ async fn stream_actor(
             } => {
                 drop(send_read.close().await);
                 tracing::trace!("C={} RESET", stream_id);
-                transmit(Message::Rel {
-                    kind: RelKind::Rst,
-                    stream_id,
-                    seqno: 0,
-                    payload: Bytes::new(),
-                });
+                send_wire_write
+                    .send(Message::Rel {
+                        kind: RelKind::Rst,
+                        stream_id,
+                        seqno: 0,
+                        payload: Bytes::new(),
+                    })
+                    .await?;
                 let die = smol::future::race(
                     async {
                         (&mut death).await;
@@ -276,8 +308,8 @@ pub(crate) struct StreamBack {
 }
 
 impl StreamBack {
-    pub fn process(&self, input: Message) {
-        let res = self.send_wire_read.try_send(input);
+    pub async fn process(&self, input: Message) {
+        let res = self.send_wire_read.send(input).await;
         if let Err(e) = res {
             tracing::trace!("stream failed to accept pkt: {}", e)
         }

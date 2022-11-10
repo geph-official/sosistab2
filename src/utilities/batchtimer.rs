@@ -1,8 +1,10 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use crate::timer::fastsleep_until;
 
 // A "stopwatch" that returns when a timer is up or when a counter reaches a max count, whichever is first
 pub struct BatchTimer {
-    timer: smol::Timer,
+    deadline: Instant,
     interval: Duration,
 
     count: usize,
@@ -12,9 +14,8 @@ pub struct BatchTimer {
 impl BatchTimer {
     /// Creates a new batch timer.
     pub fn new(interval: Duration, max_count: usize) -> Self {
-        let timer = smol::Timer::after(interval);
         Self {
-            timer,
+            deadline: Instant::now() + interval,
             interval,
             count: 0,
             max_count,
@@ -29,7 +30,7 @@ impl BatchTimer {
         }
         if self.count < self.max_count {
             // println!("count is {} so the timer fires later", self.count);
-            (&mut self.timer).await;
+            fastsleep_until(self.deadline).await;
         }
         // println!("TIMER HAS FIRED");
     }
@@ -41,7 +42,7 @@ impl BatchTimer {
 
     /// Resets the timer.
     pub fn reset(&mut self) {
-        self.timer.set_after(self.interval);
+        self.deadline = Instant::now() + self.interval;
         self.count = 0;
     }
 }

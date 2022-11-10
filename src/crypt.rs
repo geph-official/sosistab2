@@ -38,7 +38,7 @@ impl NonObfsAead {
 
     /// Returns the overhead.
     pub fn overhead() -> usize {
-        8 + CHACHA20_POLY1305.tag_len()
+        12 + CHACHA20_POLY1305.tag_len()
     }
 
     /// Encrypts a message, returning the ciphertext and integer nonce.
@@ -69,12 +69,12 @@ impl NonObfsAead {
             return Err(AeadError::BadLength);
         }
         // nonce is last 12 bytes
-        let (cytext, nonce) = ctext.split_at(ctext.len() - 8);
+        let (cytext, nonce) = ctext.split_at(ctext.len() - 12);
         // we now open
         let mut ctext = cytext.to_vec();
         self.key
             .open_in_place(
-                Nonce::try_assume_unique_for_key(nonce).unwrap(),
+                Nonce::try_assume_unique_for_key(&nonce).unwrap(),
                 Aad::empty(),
                 &mut ctext,
             )
