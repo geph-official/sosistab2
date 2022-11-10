@@ -88,7 +88,7 @@ pub async fn multiplex(
             Ok::<_, anyhow::Error>(Event::Dead(res))
         };
         // match on the event
-        match conn_open.or(recv_msg.or(send_msg.or(death))).await? {
+        match recv_msg.or(send_msg.or(conn_open.or(death))).await? {
             Event::Dead(id) => conn_tab.del_stream(id),
             Event::ConnOpen(additional_data, result_chan) => {
                 let conn_tab = conn_tab.clone();
