@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use dashmap::DashMap;
-use futures_util::future::select_all;
+
 use rand::prelude::*;
 
 use smol::channel::{Receiver, Sender};
@@ -60,7 +60,7 @@ pub async fn multiplex(
         Dead(u16),
     }
 
-    let mut send_dominance = 0.0;
+    let _send_dominance = 0.0;
 
     loop {
         // fires on receiving messages

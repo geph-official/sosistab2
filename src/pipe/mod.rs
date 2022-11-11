@@ -19,7 +19,7 @@ mod tests {
 
     use anyhow::Context;
     use bytes::Bytes;
-    use smol::net::UdpSocket;
+    
     use smol_timeout::TimeoutExt;
 
     use crate::{

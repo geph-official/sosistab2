@@ -27,7 +27,7 @@ use super::{
     frame::PipeFrame,
     stats::StatsCalculator,
 };
-const PACKET_LIVE_TIME: Duration = Duration::from_millis(10000); // placeholder
+const PACKET_LIVE_TIME: Duration = Duration::from_millis(500); // placeholder
 const BURST_SIZE: usize = 30;
 
 impl Pipe {

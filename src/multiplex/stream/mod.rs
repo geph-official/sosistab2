@@ -156,9 +156,9 @@ use StreamState::*;
 async fn stream_actor(
     mut state: StreamState,
     mut recv_write: BipeReader,
-    mut recv_write_urel: Receiver<Bytes>,
+    recv_write_urel: Receiver<Bytes>,
     mut send_read: BipeWriter,
-    mut send_read_urel: Sender<Bytes>,
+    send_read_urel: Sender<Bytes>,
     recv_wire_read: Receiver<Message>,
     send_wire_write: Sender<Message>,
     additional_info: Option<String>,

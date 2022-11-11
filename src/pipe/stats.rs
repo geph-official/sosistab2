@@ -49,7 +49,7 @@ impl StatsCalculator {
     /// Calculates stats based on data from the last 60 seconds
     pub fn get_stats(&self) -> PipeStats {
         if let Some((utime, stat)) = self.cached_stat.read().as_ref() {
-            if utime.elapsed() < Duration::from_secs(60) {
+            if utime.elapsed() < Duration::from_secs(5) {
                 return *stat;
             }
         }
@@ -61,10 +61,7 @@ impl StatsCalculator {
         let mut send_time: Vec<(u64, Instant)> = self
             .send_time
             .iter()
-            .filter(|(_seqno, sent_time)| {
-                now.duration_since(**sent_time) < Duration::from_secs(60)
-                    && now.duration_since(**sent_time) > Duration::from_secs(5)
-            })
+            .filter(|(_seqno, sent_time)| now.duration_since(**sent_time) < Duration::from_secs(60))
             .map(|(s, t)| (*s, *t))
             .collect();
         send_time.sort_unstable_by_key(|k| k.0);
@@ -88,7 +85,7 @@ impl StatsCalculator {
                     lost_qualified += 1;
                 }
             } else {
-                log::debug!("window {}..{} is BAD", first.0, last.0);
+                // log::debug!("window {}..{} is BAD", first.0, last.0);
             }
         }
         let loss = lost_qualified as f64 / (0.1 + total_qualified as f64);
