@@ -9,15 +9,16 @@ use rustc_hash::FxHashSet;
 use smol::channel::{Receiver, Sender};
 
 use crate::{
-    multiplex::{
-        stream::congestion::{CongestionControl, Highspeed},
-        structs::*,
-    },
+    multiplex::{stream::congestion::CongestionControl, structs::*},
     timer::{fastsleep, fastsleep_until},
     utilities::MyFutureExt,
 };
 
-use super::{inflight::Inflight, MSS};
+use super::{
+    congestion::{Cubic, Highspeed},
+    inflight::Inflight,
+    MSS,
+};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
@@ -60,12 +61,12 @@ impl Default for ConnVars {
             last_loss: None,
             // cc: Box::new(Cubic::new(0.7, 0.4)),
             cc: Box::new(Highspeed::new(1)),
-            // cc: Box::new(Trivial::new(8)),
+            // cc: Box::new(Trivial::new(300)),
         }
     }
 }
 
-const ACK_BATCH: usize = 32;
+const ACK_BATCH: usize = 4;
 
 #[derive(Debug)]
 enum ConnVarEvt {

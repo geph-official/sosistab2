@@ -14,7 +14,7 @@ impl Highspeed {
     /// Creates a new HSTCP instance with the given increment.
     pub fn new(multiplier: usize) -> Self {
         Self {
-            cwnd: 32.0,
+            cwnd: 1.0,
             multiplier,
             last_loss: Instant::now(),
             bdp: 0,
@@ -38,7 +38,7 @@ impl CongestionControl for Highspeed {
 
     fn mark_loss(&mut self) {
         log::debug!("loss!!! => {:.2}", self.cwnd);
-        self.cwnd = self.cwnd * 0.5;
+        self.cwnd = (self.cwnd * 0.5).max(1.0);
         self.last_loss = Instant::now();
     }
 }

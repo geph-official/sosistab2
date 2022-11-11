@@ -139,7 +139,7 @@ async fn pipe_loop(
                             ack_responder.add_ack(frame_no);
                             fec_decoder.insert_data(frame_no, body.clone());
                             if let Some(whole) = defrag.insert(frame_no, body) {
-                                let _ = send_downraw.send(whole).await;
+                                let _ = send_downraw.try_send(whole); // TODO why??
                             }
                         }
                     }

@@ -114,12 +114,9 @@ impl ObfsAead {
         rand::thread_rng().fill_bytes(&mut nonce);
 
         // make an output. it starts out containing the plaintext.
-        let mut output = Vec::new();
-        output.extend_from_slice(msg);
-
-        // add random padding to hide the length of the plaintext
-        let random_padding = vec![0u8; rand::random::<usize>() % 32];
-        output.extend_from_slice(&random_padding);
+        // we "round up" to ensure that long term averages cannot leak things either. regardless, this is very much "best effort"
+        let random_padding = vec![0u8; (16 - msg.len() % 16) + rand::random::<usize>() % 32];
+        let mut output = stdcode::serialize(&(msg, random_padding)).unwrap();
 
         // now we overwrite it
         self.key
@@ -152,7 +149,11 @@ impl ObfsAead {
             .ok_or(AeadError::DecryptionFailure)?;
         let truncate_to = ctext.len() - CHACHA20_POLY1305.tag_len();
         ctext.truncate(truncate_to);
-        Ok(ctext.into())
+
+        // split through stdcode
+        let (content, _padding): (Bytes, Bytes) =
+            stdcode::deserialize(&ctext).map_err(|_| AeadError::DecryptionFailure)?;
+        Ok(content)
     }
 }
 

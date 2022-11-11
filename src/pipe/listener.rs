@@ -76,7 +76,7 @@ async fn listener_loop(
             log::debug!("cannot forward packet from {client_addr} to an existing session ({err}), so decrypting as handshake");
             // handshake time!
             if let Ok(ptext) = init_dec.decrypt(pkt) {
-                if let Ok(msg) = bincode::deserialize::<HandshakeFrame>(&ptext) {
+                if let Ok(msg) = stdcode::deserialize::<HandshakeFrame>(&ptext) {
                     match msg {
                         HandshakeFrame::ClientHello {
                             long_pk,
@@ -104,7 +104,7 @@ async fn listener_loop(
                             };
                             socket
                                 .send_to(
-                                    &init_enc.encrypt(&bincode::serialize(&resp)?),
+                                    &init_enc.encrypt(&stdcode::serialize(&resp)?),
                                     client_addr,
                                 )
                                 .await?;
@@ -165,12 +165,12 @@ impl TokenInfo {
         // first we decrypt
         let crypter = ObfsAead::new(key);
         let plain = crypter.decrypt(encrypted)?;
-        let ctext = bincode::deserialize::<Self>(&plain)?;
+        let ctext = stdcode::deserialize::<Self>(&plain)?;
         Ok(ctext)
     }
 
     fn encrypt(&self, key: &[u8]) -> Bytes {
         let crypter = ObfsAead::new(key);
-        crypter.encrypt(&bincode::serialize(self).expect("must serialize"))
+        crypter.encrypt(&stdcode::serialize(self).expect("must serialize"))
     }
 }

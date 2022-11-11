@@ -17,7 +17,7 @@ fn main() {
                     let mut conn = mux.accept_conn().await.unwrap();
                     smolscale::spawn(async move {
                         loop {
-                            if conn.write_all(&[0u8; 16384]).await.is_err() {
+                            if conn.write_all(&[0u8; 65536]).await.is_err() {
                                 return;
                             }
                         }

@@ -12,7 +12,7 @@ mod congestion;
 mod connvars;
 mod inflight;
 
-pub const MSS: usize = 16384; // large MSS; rely on underlying transport to fragment
+pub const MSS: usize = 16384; // 16K MSS; rely on underlying transport to fragment
 const MAX_WAIT_SECS: u64 = 60;
 
 #[derive(Clone)]
@@ -52,7 +52,7 @@ impl MuxStream {
             )
             .await
             {
-                log::debug!("stream_actor died: {}", e)
+                tracing::debug!("stream_actor died: {}", e)
             }
         });
         (
@@ -156,9 +156,9 @@ use StreamState::*;
 async fn stream_actor(
     mut state: StreamState,
     mut recv_write: BipeReader,
-    recv_write_urel: Receiver<Bytes>,
+    mut recv_write_urel: Receiver<Bytes>,
     mut send_read: BipeWriter,
-    send_read_urel: Sender<Bytes>,
+    mut send_read_urel: Sender<Bytes>,
     recv_wire_read: Receiver<Message>,
     send_wire_write: Sender<Message>,
     additional_info: Option<String>,
@@ -168,7 +168,7 @@ async fn stream_actor(
     loop {
         state = match state {
             SynReceived { stream_id } => {
-                log::trace!("C={} SynReceived, sending SYN-ACK", stream_id);
+                tracing::trace!("C={} SynReceived, sending SYN-ACK", stream_id);
                 // send a synack
                 send_wire_write
                     .send(Message::Rel {
@@ -189,7 +189,7 @@ async fn stream_actor(
                 result,
             } => {
                 let wait_interval = 2u64.pow(tries as u32) * 500u64;
-                log::debug!("C={} SynSent, tried {} times", stream_id, tries);
+                tracing::debug!("C={} SynSent, tried {} times", stream_id, tries);
                 if tries > 5 {
                     anyhow::bail!("timeout")
                 }
@@ -208,14 +208,14 @@ async fn stream_actor(
                     })
                     .await?;
                 if success {
-                    log::trace!("C={} SynSent got SYN-ACK", stream_id);
+                    tracing::trace!("C={} SynSent got SYN-ACK", stream_id);
                     result.send(()).await?;
                     SteadyState {
                         stream_id,
                         conn_vars: Box::new(ConnVars::default()),
                     }
                 } else {
-                    log::trace!("C={} SynSent timed out", stream_id);
+                    tracing::trace!("C={} SynSent timed out", stream_id);
                     send_wire_write
                         .send(Message::Rel {
                             kind: RelKind::Syn,
@@ -252,7 +252,7 @@ async fn stream_actor(
                     )
                     .await
                 {
-                    log::debug!("connection reset: {:?}", err);
+                    tracing::debug!("connection reset: {:?}", err);
                     Reset {
                         stream_id,
                         death: smol::Timer::after(Duration::from_secs(MAX_WAIT_SECS)),
@@ -269,7 +269,7 @@ async fn stream_actor(
                 mut death,
             } => {
                 drop(send_read.close().await);
-                log::trace!("C={} RESET", stream_id);
+                tracing::trace!("C={} RESET", stream_id);
                 send_wire_write
                     .send(Message::Rel {
                         kind: RelKind::Rst,
@@ -309,9 +309,9 @@ pub(crate) struct StreamBack {
 
 impl StreamBack {
     pub async fn process(&self, input: Message) {
-        let res = self.send_wire_read.send(input).await;
+        let res = self.send_wire_read.try_send(input);
         if let Err(e) = res {
-            log::trace!("stream failed to accept pkt: {}", e)
+            tracing::trace!("stream failed to accept pkt: {}", e)
         }
     }
 }

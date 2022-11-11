@@ -111,27 +111,35 @@ async fn client_loop(
     let dec = ObfsAead::new(dn_key.as_bytes());
 
     loop {
-        let fal = async {
-            let msg = recv_upcoded.recv().await?;
-            // log::debug!("serverbound: {:?}", msg);
-            let msg = bincode::serialize(&msg)?;
-            let enc_msg = enc.encrypt(&msg);
-            socket.send(&enc_msg).await?;
-            anyhow::Ok(())
-        }
-        .race(async {
-            let mut buf = [0u8; 65536];
-            let n = socket.recv(&mut buf).await?;
-            log::trace!("got {} bytes from server", n);
-            let dn_msg = &buf[..n];
-            let dec_msg = dec.decrypt(dn_msg)?;
+        let res: anyhow::Result<()> = async {
+            let up_loop = async {
+                loop {
+                    let msg = recv_upcoded.recv().await?;
+                    // log::debug!("serverbound: {:?}", msg);
+                    let msg = stdcode::serialize(&msg)?;
+                    let enc_msg = enc.encrypt(&msg);
+                    socket.send(&enc_msg).await?;
+                }
+            };
 
-            let deser_msg = bincode::deserialize(&dec_msg)?;
-            send_downcoded.send(deser_msg).await?;
-            anyhow::Ok(())
-        });
-        if let Err(err) = fal.await {
-            log::warn!("an error happened while shuffling packets to/from the socket: {err}")
+            up_loop
+                .race(async {
+                    let mut buf = [0u8; 65536];
+                    loop {
+                        let n = socket.recv(&mut buf).await?;
+                        log::trace!("got {} bytes from server", n);
+                        let dn_msg = &buf[..n];
+                        let dec_msg = dec.decrypt(dn_msg)?;
+
+                        let deser_msg = stdcode::deserialize(&dec_msg)?;
+                        send_downcoded.send(deser_msg).await?;
+                    }
+                })
+                .await
+        }
+        .await;
+        if let Err(err) = res {
+            log::error!("client loop error: {:?}", err);
         }
     }
 }

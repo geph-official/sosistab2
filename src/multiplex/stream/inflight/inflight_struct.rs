@@ -146,9 +146,10 @@ impl Inflight {
                     && seg.retrans_time > now
                 {
                     log::debug!(
-                        "EARLY retransmit for lost segment {} due to ack of {}",
+                        "EARLY retransmit for lost segment {} due to ack of {} (var {:?})",
                         seqno,
-                        acked_seqno
+                        acked_seqno,
+                        self.rtt.rtt_var()
                     );
                     let old_retrans_time = std::mem::replace(&mut seg.retrans_time, now);
                     self.remove_rto(old_retrans_time, seqno);

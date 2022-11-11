@@ -35,7 +35,7 @@ pub async fn multiplex(
     let mut replay_filter = ReplayFilter::default();
 
     let conn_tab = Arc::new(ConnTable::default());
-    let (glob_send, glob_recv) = smol::channel::bounded(10000);
+    let (glob_send, glob_recv) = smol::channel::unbounded();
     let (dead_send, dead_recv) = smol::channel::unbounded();
 
     // Reap death

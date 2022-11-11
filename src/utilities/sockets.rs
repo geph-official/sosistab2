@@ -16,10 +16,10 @@ pub(crate) fn new_udp_socket_bind(addr: SocketAddr) -> std::io::Result<UdpSocket
     .unwrap();
     drop(socket.set_only_v6(false));
     socket
-        .set_recv_buffer_size(512 * 1024)
+        .set_recv_buffer_size(10 * 1024 * 1024)
         .unwrap_or_else(|e| log::warn!("cannot set receive buffer: {:?}", e));
     socket
-        .set_send_buffer_size(512 * 1024)
+        .set_send_buffer_size(10 * 1024 * 1024)
         .unwrap_or_else(|e| log::warn!("cannot set send buffer: {:?}", e));
     socket.bind(&addr.into())?;
     Ok(socket.into_udp_socket().try_into().unwrap())

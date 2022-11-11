@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use crate::utilities::batchtimer::BatchTimer;
 
 use std::{
-    collections::{VecDeque},
+    collections::VecDeque,
     time::{Duration, Instant},
 };
 
@@ -84,13 +84,7 @@ impl AckRequester {
 
     pub fn add_unacked(&mut self, seqno: u64) {
         self.unacked.push_back((seqno, Instant::now()));
-        // println!("adding an unacked!");
-        // println!("UNACKED: {:?}", self.unacked);
-        // println!("at add: {:p} UNACKED length: {}", self, self.unacked.len());
-        let (_, first_inst) = self.unacked.front().unwrap();
-        let _fire_inst = first_inst
-            .checked_add(self.packet_live_time + Duration::from_millis(500))
-            .unwrap();
+
         self.timer.increment();
     }
 

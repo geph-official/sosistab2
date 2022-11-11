@@ -42,7 +42,7 @@ impl FecEncoder {
             return vec![];
         }
 
-        assert!(self.unfecked.len() <= self.burst_size);
+        // assert!(self.unfecked.len() <= self.burst_size);
         // encode
         let mut fec_encoder = FrameEncoder::new(10); // around 4 percent
         let first_frame_no = self.unfecked[0].0;

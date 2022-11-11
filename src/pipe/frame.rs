@@ -1,16 +1,15 @@
-use std::time::{Duration};
-
-use bincode::Options;
+use std::time::Duration;
 
 use bytes::Bytes;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 /// Encodes a buffer into multiple smaller "fragments". A fragment is prepended with two bytes: how many fragments in total, and which fragment this fragment is.
 pub fn fragment(buff: Bytes, out: &mut Vec<Bytes>) {
-    const LIMIT: usize = 1300;
+    let limit = (buff.len() as f64 / (buff.len() as f64 / 1340.0).ceil()).ceil() as usize;
     // TODO: reuse the memory somehow?
-    let chunk_count = buff.len() / LIMIT + (buff.len() % LIMIT).min(1);
-    for (i, chunk) in buff.chunks(LIMIT).enumerate() {
+    let chunk_count = buff.len() / limit + (buff.len() % limit).min(1);
+    for (i, chunk) in buff.chunks(limit).enumerate() {
         let mut piece = Vec::with_capacity(chunk.len() + 2);
         piece.push(chunk_count as u8);
         piece.push(i as u8);
@@ -51,28 +50,13 @@ pub enum PipeFrame {
 
 impl PipeFrame {
     /// Pads the frame to prepare for encryption.
-    pub fn pad(&self, hidden_data: u8) -> Bytes {
-        let options = bincode::DefaultOptions::new()
-            .with_little_endian()
-            .with_varint_encoding()
-            .allow_trailing_bytes();
-        let mut vec = Vec::new();
-        options.serialize_into(&mut vec, self).unwrap();
-        vec.extend_from_slice(&[hidden_data]);
-        vec.extend_from_slice(&vec![0xff; rand::random::<usize>() % 16]);
-        vec.into()
+    pub fn pad(&self) -> Bytes {
+        stdcode::serialize(self).unwrap().into()
     }
 
     /// Depads a decrypted frame.
-    pub fn depad(bts: &[u8]) -> Option<(Self, u8)> {
-        let options = bincode::DefaultOptions::new()
-            .with_little_endian()
-            .with_varint_encoding()
-            .with_limit(bts.len() as _)
-            .allow_trailing_bytes();
-        let mut ptr = bts;
-        let res = options.deserialize_from(&mut ptr).ok()?;
-        Some((res, ptr.first().copied().unwrap_or(0xff)))
+    pub fn depad(bts: &[u8]) -> Option<Self> {
+        stdcode::deserialize(bts).ok()
     }
 }
 
@@ -102,14 +86,10 @@ pub enum HandshakeFrame {
 
 impl HandshakeFrame {
     pub fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap()
+        stdcode::serialize(self).unwrap()
     }
 
     pub fn from_bytes(bts: &[u8]) -> anyhow::Result<Self> {
-        Ok(bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .allow_trailing_bytes()
-            .with_limit(bts.len() as _)
-            .deserialize(bts)?)
+        Ok(stdcode::deserialize(bts)?)
     }
 }

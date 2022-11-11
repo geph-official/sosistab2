@@ -5,9 +5,12 @@ use smol::{
     channel::{Receiver, Sender},
     net::UdpSocket,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use crate::crypt::{dnify_shared_secret, upify_shared_secret, ObfsAead};
+use crate::{
+    crypt::{dnify_shared_secret, upify_shared_secret, ObfsAead},
+    timer::fastsleep,
+};
 
 use super::frame::PipeFrame;
 
@@ -73,7 +76,7 @@ impl PipeTable {
                 .get(&client_addr)
                 .context("no entry in the table with this client_addr")?;
             let ptext = back.decoder.decrypt(pkt)?;
-            let msg = bincode::deserialize(&ptext)?;
+            let msg = stdcode::deserialize(&ptext)?;
             back.send_downcoded.send(msg).await?;
             anyhow::Ok(())
         };
@@ -87,7 +90,7 @@ impl PipeTable {
                 // try all entries in table
                 for (key, mut back) in self.table.iter() {
                     if let Ok(ptext) = back.decoder.decrypt(pkt) {
-                        let msg = bincode::deserialize(&ptext)?;
+                        let msg = stdcode::deserialize(&ptext)?;
                         back.send_downcoded.send(msg).await?;
 
                         // update entry in table
@@ -121,7 +124,7 @@ async fn dn_forward_loop(
         loop {
             let msg = recv_upcoded.recv().await?;
             log::trace!("gonna send down {:?}", msg);
-            let ctext = encoder.encrypt(&bincode::serialize(&msg)?);
+            let ctext = encoder.encrypt(&stdcode::serialize(&msg)?);
             socket.send_to(&ctext, client_addr).await?;
         }
     }
