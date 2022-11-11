@@ -16,7 +16,7 @@ impl Cubic {
     /// Creates a new Cubic instance
     pub fn new(beta: f64, cee: f64) -> Self {
         Self {
-            cwnd: 16.0,
+            cwnd: 1.0,
             beta,
             cee,
             last_loss: None,

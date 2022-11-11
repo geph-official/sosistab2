@@ -4,7 +4,7 @@ use super::listener_table::PipeTable;
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead},
     pipe::{frame::HandshakeFrame, pipe_struct::Pipe},
-    utilities::sockets::new_udp_socket_bind,
+    utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
 };
 use bytes::Bytes;
 use rand::RngCore;
@@ -50,7 +50,7 @@ impl Listener {
 }
 
 async fn listener_loop(
-    socket: UdpSocket,
+    socket: MyUdpSocket,
     send_new_pipes: Sender<Pipe>,
     server_long_pk: x25519_dalek::PublicKey,
     server_long_sk: x25519_dalek::StaticSecret,

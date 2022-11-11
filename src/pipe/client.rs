@@ -18,7 +18,7 @@ use smol::{
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead, CLIENT_DN_KEY, CLIENT_UP_KEY},
     pipe::Pipe,
-    utilities::sockets::new_udp_socket_bind,
+    utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
 };
 
 use super::frame::{HandshakeFrame, PipeFrame};
@@ -30,10 +30,6 @@ pub async fn connect(
 ) -> anyhow::Result<Pipe> {
     let socket =
         new_udp_socket_bind("0.0.0.0:0".parse().unwrap()).context("could not bind udp socket")?;
-    socket
-        .connect(server_addr)
-        .await
-        .context("connect function failed")?;
 
     // do the handshake
     // generate pk-sk pairs for encryption after the session is established
@@ -52,12 +48,12 @@ pub async fn connect(
     let init_enc = ObfsAead::new(&cookie.generate_c2s());
     let client_hello = init_enc.encrypt(&client_hello);
     // send the ClientHello
-    socket.send(&client_hello).await?;
+    socket.send_to(&client_hello, server_addr).await?;
 
     // wait for the server's response
     let mut ctext_resp = [0u8; 2048];
-    let n = socket
-        .recv(&mut ctext_resp)
+    let (n, _) = socket
+        .recv_from(&mut ctext_resp)
         .await
         .context("can't read response from server")?;
     let ctext_resp = &ctext_resp[..n];
@@ -75,7 +71,7 @@ pub async fn connect(
         // finish off the handshake
         let client_resp =
             init_enc.encrypt(&HandshakeFrame::ClientResume { resume_token }.to_bytes());
-        socket.send(&client_resp).await?;
+        socket.send_to(&client_resp, server_addr).await?;
 
         // create a pipe
         let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
@@ -89,6 +85,7 @@ pub async fn connect(
             recv_upcoded,
             send_downcoded,
             socket,
+            server_addr,
             shared_secret,
         ))
         .detach();
@@ -102,7 +99,8 @@ pub async fn connect(
 async fn client_loop(
     recv_upcoded: Receiver<PipeFrame>,
     send_downcoded: Sender<PipeFrame>,
-    socket: UdpSocket,
+    socket: MyUdpSocket,
+    server_addr: SocketAddr,
     shared_secret: Hash,
 ) {
     let up_key = blake3::keyed_hash(CLIENT_UP_KEY, shared_secret.as_bytes());
@@ -118,7 +116,7 @@ async fn client_loop(
                     // log::debug!("serverbound: {:?}", msg);
                     let msg = stdcode::serialize(&msg)?;
                     let enc_msg = enc.encrypt(&msg);
-                    socket.send(&enc_msg).await?;
+                    socket.send_to(&enc_msg, server_addr).await?;
                 }
             };
 
@@ -126,7 +124,7 @@ async fn client_loop(
                 .race(async {
                     let mut buf = [0u8; 65536];
                     loop {
-                        let n = socket.recv(&mut buf).await?;
+                        let (n, _) = socket.recv_from(&mut buf).await?;
                         log::trace!("got {} bytes from server", n);
                         let dn_msg = &buf[..n];
                         let dec_msg = dec.decrypt(dn_msg)?;

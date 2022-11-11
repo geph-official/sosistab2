@@ -78,6 +78,7 @@ futures-timer = "3.0.2"
 tachyonix = "0.2.0"
 future-utils = "0.12.1"
 stdcode = "0.1.13"
+# fastudp = "0.1.6"
 # sliding_extrema = "0.1.4"
 
 [profile.dev]

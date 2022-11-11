@@ -10,13 +10,14 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use crate::{
     crypt::{dnify_shared_secret, upify_shared_secret, ObfsAead},
     timer::fastsleep,
+    utilities::sockets::MyUdpSocket,
 };
 
 use super::frame::PipeFrame;
 
 pub struct PipeTable {
     table: Cache<SocketAddr, PipeBack>,
-    socket: UdpSocket,
+    socket: MyUdpSocket,
 }
 
 #[derive(Clone)]
@@ -30,7 +31,7 @@ struct PipeBack {
 
 impl PipeTable {
     /// Constructor.
-    pub fn new(max_capacity: u64, socket: UdpSocket) -> Self {
+    pub fn new(max_capacity: u64, socket: MyUdpSocket) -> Self {
         Self {
             table: Cache::new(max_capacity),
             socket,
@@ -115,7 +116,7 @@ impl PipeTable {
 
 async fn dn_forward_loop(
     table: Cache<SocketAddr, PipeBack>,
-    socket: UdpSocket,
+    socket: MyUdpSocket,
     client_addr: SocketAddr,
     encoder: ObfsAead,
     recv_upcoded: Receiver<PipeFrame>,
