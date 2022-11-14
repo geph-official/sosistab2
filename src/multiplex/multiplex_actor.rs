@@ -63,7 +63,6 @@ pub async fn multiplex(
     let _send_dominance = 0.0;
 
     loop {
-        smol::future::yield_now().await;
         // fires on receiving messages
         let recv_msg = async {
             let raw_msg = pipe_pool.recv().await?;

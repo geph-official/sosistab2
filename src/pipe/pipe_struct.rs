@@ -101,7 +101,6 @@ async fn pipe_loop(
     let mut sent_without_ack_request = 0;
 
     loop {
-        smol::future::yield_now().await;
         let loss = stats_calculator.lock().get_stats().loss;
         let event = Event::unack_timeout(&mut ack_client)
             .or(Event::fec_timeout(&mut fec_encoder, loss))
