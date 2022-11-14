@@ -5,7 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use bytes::Bytes;
-use parking_lot::{Mutex};
+use parking_lot::Mutex;
 
 use smol::{
     channel::{Receiver, Sender},

@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use bitvec::{prelude::Msb0, view::BitView};
 use bytes::Bytes;
 
-
 use probability::prelude::Inverse;
 use rustc_hash::FxHashMap;
 
@@ -66,7 +65,7 @@ impl StatsCalculator {
     /// Calculates stats based on recent data.
     pub fn get_stats(&mut self) -> PipeStats {
         if let Some((utime, stat)) = self.cached_stat {
-            if utime.elapsed() < Duration::from_secs(5) {
+            if utime.elapsed() < Duration::from_secs(1) {
                 return stat;
             }
         }
@@ -153,7 +152,7 @@ impl StatsCalculator {
             jitter,
         };
         if let Some((_, old_stat)) = self.cached_stat.take() {
-            self.cached_stat = Some((Instant::now(), stats.lerp(old_stat, 0.1)));
+            self.cached_stat = Some((Instant::now(), stats.lerp(old_stat, 0.9)));
         } else {
             self.cached_stat = Some((Instant::now(), stats));
         }

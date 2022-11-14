@@ -10,15 +10,12 @@ use smol::channel::{Receiver, Sender};
 
 use crate::{
     multiplex::{stream::congestion::CongestionControl, structs::*},
+    pacer::Pacer,
     timer::{fastsleep, fastsleep_until},
     utilities::MyFutureExt,
 };
 
-use super::{
-    congestion::{Highspeed},
-    inflight::Inflight,
-    MSS,
-};
+use super::{congestion::Highspeed, inflight::Inflight, MSS};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
@@ -36,7 +33,7 @@ pub(crate) struct ConnVars {
     // next_pace_time: Instant,
     lost_seqnos: BTreeSet<Seqno>,
     last_loss: Option<Instant>,
-
+    pacer: Pacer,
     cc: Box<dyn CongestionControl + Send>,
 }
 
@@ -61,6 +58,7 @@ impl Default for ConnVars {
             last_loss: None,
             // cc: Box::new(Cubic::new(0.7, 0.4)),
             cc: Box::new(Highspeed::new(1)),
+            pacer: Pacer::new(Duration::from_millis(1)),
             // cc: Box::new(Trivial::new(300)),
         }
     }
@@ -358,7 +356,9 @@ impl ConnVars {
                     return Ok(ConnVarEvt::Closing);
                 }
             }
-
+            let pacing_interval = Duration::from_secs_f64(1.0 / self.pacing_rate());
+            self.pacer.set_interval(pacing_interval);
+            self.pacer.wait_next().await;
             Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::NewWrite(
                 self.write_fragments.pop_front().unwrap(),
             ))
@@ -382,5 +382,10 @@ impl ConnVars {
                 .or(new_pkt)
                 .or(new_write))
             .await
+    }
+
+    fn pacing_rate(&self) -> f64 {
+        // calculate implicit rate
+        (self.cc.cwnd() as f64 / self.inflight.min_rtt().as_secs_f64()).max(100.0)
     }
 }
