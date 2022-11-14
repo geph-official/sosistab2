@@ -31,14 +31,15 @@ impl CongestionControl for Highspeed {
         // let multiplier = self.last_loss.elapsed().as_secs_f64().max(1.0).min(32.0);
         // log::debug!("ack => {:.2}", self.cwnd);
         self.bdp = current_bdp;
-        self.cwnd += self.multiplier as f64 * (ping as f64 / 50.0) * (self.cwnd.powf(0.4)).max(1.0)
-            / self.cwnd;
+        self.cwnd +=
+            self.multiplier as f64 * (ping.max(1) as f64 / 50.0) * (self.cwnd.powf(0.4)).max(1.0)
+                / self.cwnd;
         // log::debug!("ack {}", self.cwnd);
     }
 
     fn mark_loss(&mut self) {
         log::debug!("loss!!! => {:.2}", self.cwnd);
-        self.cwnd = (self.cwnd * 0.5).max(1.0);
+        self.cwnd = (self.cwnd * 0.75).max(1.0);
         self.last_loss = Instant::now();
     }
 }

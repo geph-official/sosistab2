@@ -44,10 +44,10 @@ impl WrappedReedSolomon {
         let count = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if count == 255 {
-            let inner = galois_8::ReedSolomon::new(self.data_shards, self.parity_shards).unwrap();
-            self.inner.swap(Arc::new(inner));
-        }
+        // if count == 255 {
+        //     let inner = galois_8::ReedSolomon::new(self.data_shards, self.parity_shards).unwrap();
+        //     self.inner.swap(Arc::new(inner));
+        // }
         self.inner.load_full()
     }
 }

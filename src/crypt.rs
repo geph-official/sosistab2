@@ -113,21 +113,24 @@ impl ObfsAead {
         let mut nonce = [0; 12];
         rand::thread_rng().fill_bytes(&mut nonce);
 
-        // make an output. it starts out containing the plaintext.
+        // make an output. it starts out containing the padding.
         // we "round up" to ensure that long term averages cannot leak things either. regardless, this is very much "best effort"
-        // let random_padding = vec![0u8; (16 - msg.len() % 16) + rand::random::<usize>() % 32];
-        let mut output = msg.to_vec();
+        let padding_len = (16 - msg.len() % 16) + rand::random::<usize>() % 16;
+        let mut padded_msg = Vec::with_capacity(1 + padding_len + msg.len() + 12);
+        padded_msg.push(padding_len as u8);
+        padded_msg.resize(padding_len + 1, 0xff);
+        padded_msg.extend_from_slice(msg);
 
         // now we overwrite it
         self.key
             .seal_in_place_append_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::empty(),
-                &mut output,
+                &mut padded_msg,
             )
             .unwrap();
-        output.extend_from_slice(&nonce);
-        output.into()
+        padded_msg.extend_from_slice(&nonce);
+        padded_msg.into()
     }
 
     /// Decrypts a message.
@@ -149,11 +152,11 @@ impl ObfsAead {
             .ok_or(AeadError::DecryptionFailure)?;
         let truncate_to = ctext.len() - CHACHA20_POLY1305.tag_len();
         ctext.truncate(truncate_to);
-
-        // split through stdcode
-        // let (content, _padding): (Bytes, Bytes) =
-        //     stdcode::deserialize(&ctext).map_err(|_| AeadError::DecryptionFailure)?;
-        Ok(ctext.into())
+        let padding_len = ctext[0] as usize;
+        if padding_len + 1 > ctext.len() {
+            return Err(AeadError::BadLength);
+        }
+        Ok(Bytes::from(ctext).slice((padding_len + 1)..))
     }
 }
 

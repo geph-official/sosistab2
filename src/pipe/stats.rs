@@ -21,14 +21,17 @@ impl PipeStats {
         ((n * self.latency.as_secs_f64()).ln() * 1000.0) as u64
     }
 }
+
+/// A statistics calculator.
 pub struct StatsCalculator {
     /// seqno => sending time
     send_time: FxHashMap<u64, Instant>,
     /// seqno => if privileged, Some(the adjusted ack time), otherwise None
     ack_time: FxHashMap<u64, Option<Instant>>,
+    ack_or_nack: FxHashMap<u64, bool>,
 
     /// cached stats
-    cached_stat: RwLock<Option<(Instant, PipeStats)>>,
+    cached_stat: Option<(Instant, PipeStats)>,
 }
 
 impl Default for StatsCalculator {
@@ -42,61 +45,64 @@ impl StatsCalculator {
         Self {
             send_time: Default::default(),
             ack_time: Default::default(),
-            cached_stat: RwLock::new(None),
+            ack_or_nack: Default::default(),
+            cached_stat: None,
         }
     }
 
-    /// Calculates stats based on data from the last 60 seconds
-    pub fn get_stats(&self) -> PipeStats {
-        // DUMMY
-        return PipeStats {
-            loss: 0.0,
-            latency: Duration::from_millis(100),
-            jitter: Duration::from_millis(100),
-        };
-
-        if let Some((utime, stat)) = self.cached_stat.read().as_ref() {
+    /// Calculates stats based on recent data.
+    pub fn get_stats(&mut self) -> PipeStats {
+        if let Some((utime, stat)) = self.cached_stat {
             if utime.elapsed() < Duration::from_secs(5) {
-                return *stat;
+                return stat;
             }
         }
         // calculate loss
         let now = Instant::now();
         const WINDOW_SIZE: usize = 20;
-        const WINDOW_MIN_INTERVAL: Duration = Duration::from_secs(1);
+        const WINDOW_MIN_INTERVAL: Duration = Duration::from_millis(100);
 
         let mut send_time: Vec<(u64, Instant)> = self
             .send_time
             .iter()
-            .filter(|(_seqno, sent_time)| now.duration_since(**sent_time) < Duration::from_secs(60))
+            .filter(|(_seqno, sent_time)| {
+                now.duration_since(**sent_time) < Duration::from_secs(30)
+                    && now.duration_since(**sent_time) > Duration::from_secs(2)
+            })
             .map(|(s, t)| (*s, *t))
             .collect();
         send_time.sort_unstable_by_key(|k| k.0);
         let mut total_qualified = 0usize;
         let mut lost_qualified = 0usize;
+        let mut total = 0usize;
+        let mut lost = 0usize;
         for window in send_time.windows(WINDOW_SIZE) {
             let first = window.first().unwrap();
             let last = window.last().unwrap();
             let delta_time = last.1.saturating_duration_since(first.1);
-            if delta_time > WINDOW_MIN_INTERVAL {
-                log::debug!("window {}..{} is GOOD", first.0, last.0);
-                let middle = (first.0 + last.0) / 2;
-                let was_acked = self.ack_time.contains_key(&middle);
-                log::debug!(
-                    "midpoint {middle} of {}..{} was acked? {was_acked}",
-                    first.0,
-                    last.0
-                );
-                total_qualified += 1;
-                if !was_acked {
-                    lost_qualified += 1;
+            let middle = (first.0 + last.0) / 2;
+            if let Some(&was_acked) = self.ack_or_nack.get(&middle) {
+                if delta_time > WINDOW_MIN_INTERVAL {
+                    log::trace!("window {}..{} is GOOD", first.0, last.0);
+                    log::trace!(
+                        "midpoint {middle} of {}..{} was acked? {was_acked}",
+                        first.0,
+                        last.0
+                    );
+                    total_qualified += 1;
+                    if !was_acked {
+                        lost_qualified += 1;
+                    }
                 }
-            } else {
-                // log::debug!("window {}..{} is BAD", first.0, last.0);
+                total += 1;
+                if !was_acked {
+                    lost += 1;
+                }
             }
         }
-        let loss = lost_qualified as f64 / (0.1 + total_qualified as f64);
-
+        let qualified_loss = lost_qualified as f64 / (0.1 + total_qualified as f64);
+        let total_loss = lost as f64 / (0.1 + total as f64);
+        let loss = total_loss.min(qualified_loss).min(0.3);
         // calculate latency & jitter
 
         let latencies: Vec<Duration> = self
@@ -133,7 +139,8 @@ impl StatsCalculator {
             latency,
             jitter,
         };
-        *self.cached_stat.write() = Some((Instant::now(), stats));
+        self.cached_stat = Some((Instant::now(), stats));
+        log::warn!("STATS took {:?}", now.elapsed());
         stats
     }
 
@@ -142,29 +149,29 @@ impl StatsCalculator {
         &mut self,
         first_ack: u64,
         last_ack: u64,
-        acks: Bytes,
+        ack_bitmap: Bytes,
         time_offset: Option<Duration>,
     ) {
         self.cleanup();
         if let Some(time_offset) = time_offset {
             let now = Instant::now();
-            let bitmap = acks.view_bits::<Msb0>();
+            let bitmap = ack_bitmap.view_bits::<Msb0>();
 
-            for (i, acked_seqno) in bitmap
+            for (i, (acked, seqno)) in bitmap
                 .iter()
                 .zip(first_ack..=last_ack)
-                .filter(|(b, _)| **b)
-                .map(|(_, seqno)| seqno)
+                .map(|(acked, seqno)| (*acked, seqno))
                 .enumerate()
             {
                 self.ack_time.insert(
-                    acked_seqno,
+                    seqno,
                     if i == 0 {
                         Some(now - time_offset)
                     } else {
                         None
                     },
                 );
+                self.ack_or_nack.insert(seqno, acked);
             }
         }
     }
@@ -174,11 +181,8 @@ impl StatsCalculator {
             // cut down to half
             let largest = self.send_time.keys().copied().max().unwrap_or_default();
             self.send_time.retain(|k, _| largest - k < 50_000);
-        }
-        if self.ack_time.len() > 100_000 {
-            // cut down to half
-            let largest = self.ack_time.keys().copied().max().unwrap_or_default();
             self.ack_time.retain(|k, _| largest - k < 50_000);
+            self.ack_or_nack.retain(|k, _| largest - k < 50_000);
         }
     }
 

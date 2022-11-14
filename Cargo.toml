@@ -18,10 +18,7 @@ x25519-dalek={ version = "1.1.0", features = ["serde"] }
 serde={ version = "1.0.131", features = ["derive", "rc"] }
 # bytes={ version = "1.0.0", features = ["serde"] }
 blake3= "0.3"
-c2-chacha= "0.3.3"
 rand= "0.7"
-constant_time_eq= "0.1.5"
-
 event-listener= "2.5.1"
 futures-util = "0.3.18"
 parking_lot= "0.11.2"
@@ -30,10 +27,10 @@ async-dup= "1.2.2"
 once_cell = "1.9.0"
 arc-swap= "1.5.0"
 num_cpus= "1.13.0"
-arraymap= "0.1.1"
+
 anyhow= "1.0.51"
 scopeguard= "1.1.0"
-reed-solomon-erasure= "4.0.2"
+reed-solomon-erasure= "6"
 indexmap= "1.7.0"
 bloomfilter = { version = "1.0.9", features = ["random"] }
 concurrent-queue= "1.2.2"
@@ -84,10 +81,15 @@ stdcode = "0.1.13"
 [profile.dev]
 panic="abort"
 
+[profile.release-dbg]
+inherits="release"
+panic = "abort"
+debug=2
+
+
 [profile.release]
 panic = "abort"
-opt-level=3
-debug=2
+
 
 [target.'cfg(unix)'.dependencies]
 nix= "0.23.0"

@@ -41,8 +41,6 @@ impl FecEncoder {
         if self.unfecked.is_empty() {
             return vec![];
         }
-
-        // assert!(self.unfecked.len() <= self.burst_size);
         // encode
         let mut fec_encoder = FrameEncoder::new(10); // around 4 percent
         let first_frame_no = self.unfecked[0].0;
@@ -162,7 +160,7 @@ impl FrameEncoder {
             }))
         .min(255 - run_len)
         .min(run_len * 2);
-        log::trace!("expand batch of {} with {} parities", run_len, result);
+        log::debug!("expand batch of {} with {} parities", run_len, result);
         result
     }
 }

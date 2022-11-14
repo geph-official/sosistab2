@@ -75,7 +75,7 @@ impl<T: Clone> Reorderer<T> {
             }
             true
         } else {
-            log::debug!("rejecting (seq={}, min={})", seq, self.min);
+            log::debug!("out of order (seq={}, min={})", seq, self.min);
             // if less than min, we still accept
             seq < self.min
         }

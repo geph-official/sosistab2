@@ -4,7 +4,7 @@ use crate::{
     PipeStats,
 };
 use bytes::Bytes;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use smol::{
     channel::{Receiver, Sender},
@@ -16,7 +16,7 @@ use std::{convert::Infallible, sync::Arc, time::Duration};
 pub struct Pipe {
     send_upraw: Sender<Bytes>,
     recv_downraw: Receiver<Bytes>,
-    stats_calculator: Arc<RwLock<StatsCalculator>>,
+    stats_calculator: Arc<Mutex<StatsCalculator>>,
     _task: smol::Task<Infallible>,
 }
 
@@ -28,7 +28,7 @@ use super::{
     stats::StatsCalculator,
 };
 const PACKET_LIVE_TIME: Duration = Duration::from_millis(500); // placeholder
-const BURST_SIZE: usize = 30;
+const BURST_SIZE: usize = 40;
 
 impl Pipe {
     /// Creates a new Pipe that receives messages from `recv_downcoded` and send messages to `send_upcoded`. This should only be used if you are creating your own underlying transport; otherwise use the functions provided in this crate to create Pipes backed by an obfuscated, packet loss-resistant UDP transport.
@@ -40,7 +40,7 @@ impl Pipe {
     ) -> Self {
         let (send_upraw, recv_upraw) = smol::channel::bounded(100);
         let (send_downraw, recv_downraw) = smol::channel::bounded(100);
-        let stats_calculator = Arc::new(RwLock::new(StatsCalculator::new()));
+        let stats_calculator = Arc::new(Mutex::new(StatsCalculator::new()));
 
         let pipe_loop_future = pipe_loop(
             recv_upraw,
@@ -76,7 +76,7 @@ impl Pipe {
 
     /// Returns Pipe statistics
     pub fn get_stats(&self) -> PipeStats {
-        self.stats_calculator.read().get_stats()
+        self.stats_calculator.lock().get_stats()
     }
 }
 
@@ -86,7 +86,7 @@ async fn pipe_loop(
     send_upcoded: Sender<PipeFrame>,
     recv_downcoded: Receiver<PipeFrame>,
     send_downraw: Sender<Bytes>,
-    stats_calculator: Arc<RwLock<StatsCalculator>>,
+    stats_calculator: Arc<Mutex<StatsCalculator>>,
 ) -> Infallible {
     let mut next_seqno = 0;
     let mut ack_responder = AckResponder::new(100000);
@@ -102,7 +102,7 @@ async fn pipe_loop(
 
     loop {
         smol::future::yield_now().await;
-        let loss = stats_calculator.read().get_stats().loss;
+        let loss = stats_calculator.lock().get_stats().loss;
         let event = Event::unack_timeout(&mut ack_client)
             .or(Event::fec_timeout(&mut fec_encoder, loss))
             .or(Event::new_in_packet(&recv_downcoded))
@@ -122,7 +122,7 @@ async fn pipe_loop(
                         next_seqno += 1;
                         fec_encoder.add_unfecked(seqno, bts.clone());
                         ack_client.add_unacked(seqno);
-                        stats_calculator.write().add_sent(seqno);
+                        stats_calculator.lock().add_sent(seqno);
 
                         let msg = PipeFrame::Data {
                             frame_no: seqno,
@@ -163,7 +163,7 @@ async fn pipe_loop(
                             for (seqno, p) in reconstructed {
                                 if replay_filter.add(seqno) {
                                     if let Some(p) = defrag.insert(seqno, p) {
-                                        let _ = send_downraw.send(p).await;
+                                        let _ = send_downraw.try_send(p);
                                     }
                                 }
                             }
@@ -175,7 +175,7 @@ async fn pipe_loop(
                         ack_bitmap: acks,
                         time_offset,
                     } => stats_calculator
-                        .write()
+                        .lock()
                         .add_acks(first_ack, last_ack, acks, time_offset),
                     PipeFrame::AckRequest {
                         first_ack,
@@ -183,7 +183,7 @@ async fn pipe_loop(
                     } => {
                         let acks = ack_responder.construct_acks(first_ack, last_ack);
                         for ack in acks {
-                            let _ = send_upcoded.send(ack).await;
+                            let _ = send_upcoded.try_send(ack);
                         }
                     }
                 },
@@ -194,13 +194,13 @@ async fn pipe_loop(
                     } = &ack_req
                     {
                         sent_without_ack_request -= (last_ack - first_ack) as usize;
-                        let _ = send_upcoded.send(ack_req).await;
+                        let _ = send_upcoded.try_send(ack_req);
                     }
                 } // send ack request
                 Event::FecTimeout(parity_frames) => {
                     log::trace!("FecTimeout; sending {} parities", parity_frames.len());
                     for parity_frame in parity_frames {
-                        let _ = send_upcoded.send(parity_frame).await;
+                        let _ = send_upcoded.try_send(parity_frame);
                     }
                 }
             }
