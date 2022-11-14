@@ -39,8 +39,8 @@ impl ObfsUdpPipe {
         recv_downcoded: Receiver<PipeFrame>,
         send_upcoded: Sender<PipeFrame>,
     ) -> Self {
-        let (send_upraw, recv_upraw) = smol::channel::bounded(100);
-        let (send_downraw, recv_downraw) = smol::channel::bounded(100);
+        let (send_upraw, recv_upraw) = smol::channel::bounded(10000);
+        let (send_downraw, recv_downraw) = smol::channel::bounded(10000);
         let stats_calculator = Arc::new(Mutex::new(StatsCalculator::new()));
 
         let pipe_loop_future = pipe_loop(
@@ -182,7 +182,7 @@ async fn pipe_loop(
                     } => {
                         let acks = ack_responder.construct_acks(first_ack, last_ack);
                         for ack in acks {
-                            let _ = send_upcoded.try_send(ack);
+                            let _ = send_upcoded.send(ack).await;
                         }
                     }
                 },
@@ -193,13 +193,13 @@ async fn pipe_loop(
                     } = &ack_req
                     {
                         sent_without_ack_request -= (last_ack - first_ack) as usize;
-                        let _ = send_upcoded.try_send(ack_req);
+                        let _ = send_upcoded.send(ack_req).await;
                     }
                 } // send ack request
                 Event::FecTimeout(parity_frames) => {
                     log::trace!("FecTimeout; sending {} parities", parity_frames.len());
                     for parity_frame in parity_frames {
-                        let _ = send_upcoded.try_send(parity_frame);
+                        let _ = send_upcoded.send(parity_frame).await;
                     }
                 }
             }

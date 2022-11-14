@@ -66,7 +66,7 @@ impl Default for ConnVars {
     }
 }
 
-const ACK_BATCH: usize = 8;
+const ACK_BATCH: usize = 1;
 
 #[derive(Debug)]
 enum ConnVarEvt {

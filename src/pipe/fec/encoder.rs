@@ -42,7 +42,7 @@ impl FecEncoder {
             return vec![];
         }
         // encode
-        let mut fec_encoder = FrameEncoder::new(10); // around 4 percent
+        let mut fec_encoder = FrameEncoder::new(4); // around 4 percent
         let first_frame_no = self.unfecked[0].0;
         let data_count = self.unfecked.len();
         let expanded = fec_encoder.encode(

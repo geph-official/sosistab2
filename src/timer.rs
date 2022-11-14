@@ -20,27 +20,27 @@ pub async fn fastsleep(dur: Duration) {
 
 /// High performance sleep until
 pub async fn fastsleep_until(at: Instant) {
-    smol::Timer::at(at).await;
+    // smol::Timer::at(at).await;
 
-    // // yield once so that if this future isn't polled we don't do anything
-    // smol::future::yield_now().await;
-    // let target_uptime_ms = at.saturating_duration_since(*START).as_millis() as u64;
-    // let evt = {
-    //     let notifiers = NOTIFIERS.read();
-    //     if CURR_UPTIME_MS.load(Ordering::SeqCst) < target_uptime_ms {
-    //         let evt: Arc<ManualResetEvent> = notifiers
-    //             .entry(target_uptime_ms)
-    //             .or_insert_with(|| Arc::new(ManualResetEvent::new(false)))
-    //             .clone();
-    //         Some(evt)
-    //     } else {
-    //         None
-    //     }
-    // };
-    // if let Some(val) = evt {
-    //     TIMER_THREAD.thread().unpark();
-    //     val.wait().await;
-    // }
+    // yield once so that if this future isn't polled we don't do anything
+    smol::future::yield_now().await;
+    let target_uptime_ms = at.saturating_duration_since(*START).as_millis() as u64;
+    let evt = {
+        let notifiers = NOTIFIERS.read();
+        if CURR_UPTIME_MS.load(Ordering::SeqCst) < target_uptime_ms {
+            let evt: Arc<ManualResetEvent> = notifiers
+                .entry(target_uptime_ms)
+                .or_insert_with(|| Arc::new(ManualResetEvent::new(false)))
+                .clone();
+            Some(evt)
+        } else {
+            None
+        }
+    };
+    if let Some(val) = evt {
+        TIMER_THREAD.thread().unpark();
+        val.wait().await;
+    }
 }
 
 static START: Lazy<Instant> = Lazy::new(Instant::now);

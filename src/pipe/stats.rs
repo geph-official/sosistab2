@@ -20,6 +20,19 @@ impl PipeStats {
         let n = threshold.log(self.loss).ceil(); // number of transmissions needed so that Prob(pkt is lost) <= threshold
         ((n * self.latency.as_secs_f64()).ln() * 1000.0) as u64
     }
+
+    fn lerp(&self, other: Self, factor: f64) -> Self {
+        let afactor = 1.0 - factor;
+        Self {
+            loss: self.loss * afactor + other.loss * factor,
+            latency: Duration::from_secs_f64(
+                self.latency.as_secs_f64() * afactor + other.latency.as_secs_f64(),
+            ),
+            jitter: Duration::from_secs_f64(
+                self.jitter.as_secs_f64() * afactor + other.jitter.as_secs_f64(),
+            ),
+        }
+    }
 }
 
 /// A statistics calculator.
@@ -102,7 +115,7 @@ impl StatsCalculator {
         }
         let qualified_loss = lost_qualified as f64 / (0.1 + total_qualified as f64);
         let total_loss = lost as f64 / (0.1 + total as f64);
-        let loss = total_loss.min(qualified_loss).min(0.0);
+        let loss = total_loss.min(qualified_loss).min(0.3);
         // calculate latency & jitter
 
         let latencies: Vec<Duration> = self
@@ -139,7 +152,11 @@ impl StatsCalculator {
             latency,
             jitter,
         };
-        self.cached_stat = Some((Instant::now(), stats));
+        if let Some((_, old_stat)) = self.cached_stat.take() {
+            self.cached_stat = Some((Instant::now(), stats.lerp(old_stat, 0.1)));
+        } else {
+            self.cached_stat = Some((Instant::now(), stats));
+        }
         log::warn!("STATS took {:?}", now.elapsed());
         stats
     }

@@ -30,7 +30,7 @@ num_cpus= "1.13.0"
 
 anyhow= "1.0.51"
 scopeguard= "1.1.0"
-reed-solomon-erasure= "6"
+reed-solomon-erasure={version="6", features=["simd-accel"]}
 indexmap= "1.7.0"
 bloomfilter = { version = "1.0.9", features = ["random"] }
 concurrent-queue= "1.2.2"
