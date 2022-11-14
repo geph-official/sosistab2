@@ -1,8 +1,9 @@
 use crate::{
     pipe::{defrag::Defragmenter, fec::ParitySpaceKey, frame::fragment},
     utilities::ReplayFilter,
-    PipeStats,
+    Pipe, PipeStats,
 };
+use async_trait::async_trait;
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 
@@ -13,7 +14,7 @@ use smol::{
 use std::{convert::Infallible, sync::Arc, time::Duration};
 
 /// Represents an unreliable datagram connection. Generally, this is not to be used directly, but fed into [crate::Multiplex] instances to be used as the underlying transport.
-pub struct Pipe {
+pub struct ObfsUdpPipe {
     send_upraw: Sender<Bytes>,
     recv_downraw: Receiver<Bytes>,
     stats_calculator: Arc<Mutex<StatsCalculator>>,
@@ -30,7 +31,7 @@ use super::{
 const PACKET_LIVE_TIME: Duration = Duration::from_millis(500); // placeholder
 const BURST_SIZE: usize = 40;
 
-impl Pipe {
+impl ObfsUdpPipe {
     /// Creates a new Pipe that receives messages from `recv_downcoded` and send messages to `send_upcoded`. This should only be used if you are creating your own underlying transport; otherwise use the functions provided in this crate to create Pipes backed by an obfuscated, packet loss-resistant UDP transport.
     ///
     /// The caller must arrange to drain the other end of `send_upcoded` promptly; otherwise the Pipe itself will get stuck.
@@ -57,25 +58,24 @@ impl Pipe {
             _task: smolscale::spawn(pipe_loop_future),
         }
     }
+}
 
-    /// Sends a datagram to the other side
-    pub async fn send(&self, to_send: Bytes) {
-        self.send_upraw.send(to_send).await.unwrap()
+#[async_trait]
+impl Pipe for ObfsUdpPipe {
+    async fn send(&self, to_send: Bytes) {
+        let _ = self.send_upraw.send(to_send).await;
     }
 
-    /// Receives the next datagram from the other side
-    pub async fn recv(&self) -> Bytes {
-        self.recv_downraw.recv().await.unwrap()
+    async fn recv(&self) -> std::io::Result<Bytes> {
+        self.recv_downraw.recv().await.map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "obfsudp task somehow failed",
+            )
+        })
     }
 
-    /// Receives the next datagram if one is ready to be received; non-blocking
-    pub fn try_recv(&self) -> anyhow::Result<Bytes> {
-        let pkt = self.recv_downraw.try_recv()?;
-        Ok(pkt)
-    }
-
-    /// Returns Pipe statistics
-    pub fn get_stats(&self) -> PipeStats {
+    fn get_stats(&self) -> PipeStats {
         self.stats_calculator.lock().get_stats()
     }
 }

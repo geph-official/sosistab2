@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use super::listener_table::PipeTable;
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead},
-    pipe::{frame::HandshakeFrame, pipe_struct::Pipe},
+    pipe::{frame::HandshakeFrame, pipe_struct::ObfsUdpPipe},
     utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
 };
 use bytes::Bytes;
@@ -15,7 +15,7 @@ use smol::{
 };
 
 pub struct Listener {
-    recv_new_pipes: Receiver<Pipe>,
+    recv_new_pipes: Receiver<ObfsUdpPipe>,
     _task: smol::Task<()>,
 }
 
@@ -23,7 +23,7 @@ impl Listener {
     /// Constructor.
     pub fn new(listen: SocketAddr, server_long_sk: x25519_dalek::StaticSecret) -> Self {
         let socket = new_udp_socket_bind(listen).unwrap();
-        let (send_new_pipes, recv_new_pipes) = smol::channel::unbounded();
+        let (send_new_pipes, recv_new_pipes) = smol::channel::bounded(1000);
         let task = smolscale::spawn(async move {
             if let Err(err) = listener_loop(
                 socket.clone(),
@@ -43,15 +43,16 @@ impl Listener {
         }
     }
 
-    pub async fn accept(&self) -> anyhow::Result<Pipe> {
+    pub async fn accept(&self) -> anyhow::Result<ObfsUdpPipe> {
         let p = self.recv_new_pipes.recv().await?;
+        log::debug!("ACCEPTED a pipe");
         Ok(p)
     }
 }
 
 async fn listener_loop(
     socket: MyUdpSocket,
-    send_new_pipes: Sender<Pipe>,
+    send_new_pipes: Sender<ObfsUdpPipe>,
     server_long_pk: x25519_dalek::PublicKey,
     server_long_sk: x25519_dalek::StaticSecret,
 ) -> anyhow::Result<()> {
@@ -75,79 +76,88 @@ async fn listener_loop(
         if let Err(err) = table.try_forward(pkt, client_addr).await {
             log::debug!("cannot forward packet from {client_addr} to an existing session ({err}), so decrypting as handshake");
             // handshake time!
-            if let Ok(ptext) = init_dec.decrypt(pkt) {
-                if let Ok(msg) = stdcode::deserialize::<HandshakeFrame>(&ptext) {
-                    match msg {
-                        HandshakeFrame::ClientHello {
-                            long_pk,
-                            eph_pk,
-                            version,
-                            timestamp,
-                        } => {
-                            // println!("received ClientHello: {:?}", msg);
-                            let server_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
-
-                            // make token
-                            let shared_secret =
-                                triple_ecdh(&server_long_sk, &server_eph_sk, &long_pk, &eph_pk);
-
-                            let token = TokenInfo {
-                                sess_key: Bytes::copy_from_slice(shared_secret.as_bytes()),
-                                init_time_ms: timestamp,
+            match init_dec.decrypt(pkt) {
+                Ok(ptext) => {
+                    log::debug!("it really was a handshake!");
+                    if let Ok(msg) = stdcode::deserialize::<HandshakeFrame>(&ptext) {
+                        match msg {
+                            HandshakeFrame::ClientHello {
+                                long_pk,
+                                eph_pk,
                                 version,
-                            };
-                            let encrypted_token = token.encrypt(&token_key);
-                            let resp = HandshakeFrame::ServerHello {
-                                long_pk: server_long_pk,
-                                eph_pk: (&server_eph_sk).into(), // this is possible because PublicKey implements From<&E
-                                resume_token: encrypted_token,
-                            };
-                            socket
-                                .send_to(
-                                    &init_enc.encrypt(&stdcode::serialize(&resp)?),
-                                    client_addr,
-                                )
-                                .await?;
-                        }
-                        HandshakeFrame::ServerHello { .. } => {
-                            log::warn!(
-                                "some stupid client at {} sent us a server hello",
-                                client_addr
-                            );
-                        }
-                        HandshakeFrame::ClientResume { resume_token } => {
-                            let fallible = async {
-                                let token_info = TokenInfo::decrypt(&token_key, &resume_token)?;
-                                let (send_upcoded, recv_upcoded) = smol::channel::bounded(256);
-                                let (send_downcoded, recv_downcoded) = smol::channel::bounded(256);
-                                table.add_entry(
-                                    client_addr,
-                                    recv_upcoded,
-                                    send_downcoded,
-                                    &token_info.sess_key,
+                                timestamp,
+                            } => {
+                                let server_eph_sk =
+                                    x25519_dalek::StaticSecret::new(rand::thread_rng());
+
+                                // make token
+                                let shared_secret =
+                                    triple_ecdh(&server_long_sk, &server_eph_sk, &long_pk, &eph_pk);
+
+                                let token = TokenInfo {
+                                    sess_key: Bytes::copy_from_slice(shared_secret.as_bytes()),
+                                    init_time_ms: timestamp,
+                                    version,
+                                };
+                                let encrypted_token = token.encrypt(&token_key);
+                                let resp = HandshakeFrame::ServerHello {
+                                    long_pk: server_long_pk,
+                                    eph_pk: (&server_eph_sk).into(), // this is possible because PublicKey implements From<&E
+                                    resume_token: encrypted_token,
+                                };
+                                socket
+                                    .send_to(
+                                        &init_enc.encrypt(&stdcode::serialize(&resp)?),
+                                        client_addr,
+                                    )
+                                    .await?;
+                            }
+                            HandshakeFrame::ServerHello { .. } => {
+                                log::warn!(
+                                    "some stupid client at {} sent us a server hello",
+                                    client_addr
                                 );
-                                log::debug!(
-                                    "SERVER shared_secret: {:?}",
-                                    hex::encode(token_info.sess_key)
-                                );
-                                let pipe =
-                                    Pipe::with_custom_transport(recv_downcoded, send_upcoded);
-                                anyhow::Ok(pipe)
-                            };
-                            match fallible.await {
-                                Ok(pipe) => {
-                                    // if send_new_pipes is full (because of a stupid app that does not call listen in a loop fast enough), we drop the session rather than have everything grind to a halt.
-                                    let _ = send_new_pipes.try_send(pipe);
-                                }
-                                Err(err) => {
-                                    log::debug!("client {client_addr} sent a BAD resume: {err}")
+                            }
+                            HandshakeFrame::ClientResume { resume_token } => {
+                                let fallible = async {
+                                    let token_info = TokenInfo::decrypt(&token_key, &resume_token)?;
+                                    let (send_upcoded, recv_upcoded) = smol::channel::bounded(100);
+                                    let (send_downcoded, recv_downcoded) =
+                                        smol::channel::bounded(100);
+                                    table.add_entry(
+                                        client_addr,
+                                        recv_upcoded,
+                                        send_downcoded,
+                                        &token_info.sess_key,
+                                    );
+                                    log::debug!(
+                                        "SERVER shared_secret: {:?}",
+                                        hex::encode(token_info.sess_key)
+                                    );
+                                    let pipe = ObfsUdpPipe::with_custom_transport(
+                                        recv_downcoded,
+                                        send_upcoded,
+                                    );
+                                    anyhow::Ok(pipe)
+                                };
+                                match fallible.await {
+                                    Ok(pipe) => {
+                                        // if send_new_pipes is full (because of a stupid app that does not call listen in a loop fast enough), we drop the session rather than have everything grind to a halt.
+                                        let _ = send_new_pipes.try_send(pipe);
+                                    }
+                                    Err(err) => {
+                                        log::debug!("client {client_addr} sent a BAD resume: {err}")
+                                    }
                                 }
                             }
                         }
-                    }
-                };
-            } else {
-                log::warn!("oh no!");
+                    } else {
+                        log::warn!("could not decode handshake")
+                    };
+                }
+                Err(err) => {
+                    log::warn!("oh no cannot decrypt! {:?} ({})", err, pkt.len());
+                }
             }
         }
     }

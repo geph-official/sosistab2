@@ -3,29 +3,45 @@ pub mod client;
 mod defrag;
 mod fec;
 mod frame;
-pub use listener_table::*;
 pub mod listener;
-pub use listener_table::*;
+
 pub mod listener_table;
-pub use listener_table::*;
-pub mod stats;
-pub use stats::*;
-pub mod pipe_struct;
+mod pipe_struct;
+use async_trait::async_trait;
+use bytes::Bytes;
 pub use pipe_struct::*;
+mod stats;
+pub use stats::*;
+
+/// Encapsulates a "pipe" that can carry datagrams along one particular path. This should almost always be used in conjunction with [crate::Multiplex].
+#[async_trait]
+pub trait Pipe {
+    /// Sends a datagram to the other side. Should never block; if the datagram cannot be sent quickly it should simply be dropped.
+    ///
+    /// Datagrams of at least 65535 bytes must be accepted, but larger datagrams might not be.
+    async fn send(&self, to_send: Bytes);
+
+    /// Receives the next datagram from the other side. If the pipe has failed, this must return an error promptly.
+    async fn recv(&self) -> std::io::Result<Bytes>;
+
+    /// Returns Pipe statistics
+    fn get_stats(&self) -> PipeStats;
+}
 
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, str, time::Duration};
 
     use anyhow::Context;
+    use async_trait::async_trait;
     use bytes::Bytes;
-    
+
     use smol_timeout::TimeoutExt;
 
     use crate::{
         connect,
         pipe::{frame::PipeFrame, Pipe},
-        Listener,
+        Listener, ObfsUdpPipe,
     };
 
     #[test]
@@ -33,8 +49,9 @@ mod tests {
         smolscale::block_on(async {
             let (alice_send_upcoded, bob_recv_downcoded) = smol::channel::unbounded();
             let (bob_send_upcoded, alice_recv_downcoded) = smol::channel::unbounded();
-            let alice = Pipe::with_custom_transport(alice_recv_downcoded, alice_send_upcoded);
-            let bob = Pipe::with_custom_transport(bob_recv_downcoded, bob_send_upcoded);
+            let alice =
+                ObfsUdpPipe::with_custom_transport(alice_recv_downcoded, alice_send_upcoded);
+            let bob = ObfsUdpPipe::with_custom_transport(bob_recv_downcoded, bob_send_upcoded);
             println!("alice & bob are connected!");
 
             // send a bunch of numbers from a to b
@@ -42,12 +59,12 @@ mod tests {
             for i in 0..10000 {
                 let val = format!("{}", i);
                 alice_set.insert(val.clone());
-                alice.send(Bytes::from(val.clone())).await;
+                alice.send(Bytes::from(val.clone()));
             }
             // put all packets received on bob's end into a hashmap
             let mut bob_set: HashSet<String> = HashSet::new();
             for _i in 0..10000 {
-                let received = bob.recv().await;
+                let received = bob.recv().await.unwrap();
                 let val = str::from_utf8(&received).unwrap().to_owned();
                 bob_set.insert(val);
             }
@@ -66,11 +83,11 @@ mod tests {
         smolscale::block_on(async {
             let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
             let (_send_downcoded, recv_downcoded) = smol::channel::unbounded();
-            let pipe = Pipe::with_custom_transport(recv_downcoded, send_upcoded);
+            let pipe = ObfsUdpPipe::with_custom_transport(recv_downcoded, send_upcoded);
 
             for i in 0..10000 {
                 let val = format!("{}", i);
-                pipe.send(Bytes::from(val)).await;
+                pipe.send(Bytes::from(val));
             }
 
             let mut table = HashSet::new();
@@ -114,11 +131,11 @@ mod tests {
         smolscale::block_on(async {
             let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
             let (_send_downcoded, recv_downcoded) = smol::channel::unbounded();
-            let pipe = Pipe::with_custom_transport(recv_downcoded, send_upcoded);
+            let pipe = ObfsUdpPipe::with_custom_transport(recv_downcoded, send_upcoded);
 
             for i in 0..16000 {
                 let val = format!("{}", i);
-                pipe.send(Bytes::from(val)).await;
+                pipe.send(Bytes::from(val));
             }
 
             let mut parity_set = HashSet::new();
@@ -160,16 +177,17 @@ mod tests {
         smolscale::block_on(async {
             let (alice_send_upcoded, alice_recv_upcoded) = smol::channel::unbounded();
             let (_alice_send_downcoded, alice_recv_downcoded) = smol::channel::unbounded();
-            let alice = Pipe::with_custom_transport(alice_recv_downcoded, alice_send_upcoded);
+            let alice =
+                ObfsUdpPipe::with_custom_transport(alice_recv_downcoded, alice_send_upcoded);
 
             let (bob_send_upcoded, _bob_recv_upcoded) = smol::channel::unbounded();
             let (bob_send_downcoded, bob_recv_downcoded) = smol::channel::unbounded();
-            let bob = Pipe::with_custom_transport(bob_recv_downcoded, bob_send_upcoded);
+            let bob = ObfsUdpPipe::with_custom_transport(bob_recv_downcoded, bob_send_upcoded);
 
             // alice sends
             for i in 0..16000 {
                 let val = format!("{}", i);
-                alice.send(Bytes::from(val)).await;
+                alice.send(Bytes::from(val));
             }
 
             // packet-dropping forwarding actor
@@ -245,9 +263,9 @@ mod tests {
 
                 // communicate
                 let msg = "labooyah!";
-                client_pipe.send(Bytes::from(msg)).await;
+                client_pipe.send(Bytes::from(msg));
                 println!("msg sent: {msg}");
-                let msg = server_pipe.recv().await;
+                let msg = server_pipe.recv().await.unwrap();
                 let res = str::from_utf8(&msg)?;
                 println!("msg received: {res}");
                 assert!(res == "labooyah!");

@@ -12,13 +12,12 @@ use blake3::Hash;
 use smol::{
     channel::{Receiver, Sender},
     future::FutureExt,
-    net::UdpSocket,
 };
 
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead, CLIENT_DN_KEY, CLIENT_UP_KEY},
-    pipe::Pipe,
     utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
+    ObfsUdpPipe,
 };
 
 use super::frame::{HandshakeFrame, PipeFrame};
@@ -27,7 +26,7 @@ use super::frame::{HandshakeFrame, PipeFrame};
 pub async fn connect(
     server_addr: SocketAddr,
     server_pk: x25519_dalek::PublicKey,
-) -> anyhow::Result<Pipe> {
+) -> anyhow::Result<ObfsUdpPipe> {
     let socket =
         new_udp_socket_bind("0.0.0.0:0".parse().unwrap()).context("could not bind udp socket")?;
 
@@ -76,7 +75,7 @@ pub async fn connect(
         // create a pipe
         let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
         let (send_downcoded, recv_downcoded) = smol::channel::unbounded();
-        let pipe = Pipe::with_custom_transport(recv_downcoded, send_upcoded);
+        let pipe = ObfsUdpPipe::with_custom_transport(recv_downcoded, send_upcoded);
 
         // start background encrypting/decrypting + forwarding task
         let shared_secret = triple_ecdh(&my_long_sk, &my_eph_sk, &long_pk, &eph_pk);

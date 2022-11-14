@@ -102,7 +102,7 @@ impl StatsCalculator {
         }
         let qualified_loss = lost_qualified as f64 / (0.1 + total_qualified as f64);
         let total_loss = lost as f64 / (0.1 + total as f64);
-        let loss = total_loss.min(qualified_loss).min(0.3);
+        let loss = total_loss.min(qualified_loss).min(0.0);
         // calculate latency & jitter
 
         let latencies: Vec<Duration> = self
