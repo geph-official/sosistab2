@@ -41,7 +41,7 @@ impl WrappedReedSolomon {
 
     /// Obtains the inner RS.
     pub fn get_inner(&self) -> impl Deref<Target = galois_8::ReedSolomon> {
-        let count = self
+        let _count = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // if count == 255 {

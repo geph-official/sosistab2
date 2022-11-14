@@ -3,13 +3,11 @@ use anyhow::Context;
 use moka::sync::Cache;
 use smol::{
     channel::{Receiver, Sender},
-    net::UdpSocket,
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc};
 
 use crate::{
     crypt::{dnify_shared_secret, upify_shared_secret, ObfsAead},
-    timer::fastsleep,
     utilities::sockets::MyUdpSocket,
 };
 

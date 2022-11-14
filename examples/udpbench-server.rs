@@ -5,7 +5,7 @@ use sosistab2::{Listener, Multiplex};
 fn main() {
     env_logger::init();
     let server_sk = x25519_dalek::StaticSecret::new(rand_chacha::ChaCha8Rng::seed_from_u64(0));
-    let sk2 = server_sk.clone();
+    let sk2 = server_sk;
     smolscale::block_on(async move {
         let listener = Listener::new("0.0.0.0:10000".parse().unwrap(), sk2);
         loop {

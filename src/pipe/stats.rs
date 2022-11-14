@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use bitvec::{prelude::Msb0, view::BitView};
 use bytes::Bytes;
 
-use parking_lot::RwLock;
+
 use probability::prelude::Inverse;
 use rustc_hash::FxHashMap;
 

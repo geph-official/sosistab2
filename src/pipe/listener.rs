@@ -11,7 +11,6 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use smol::{
     channel::{Receiver, Sender},
-    net::UdpSocket,
 };
 
 pub struct Listener {

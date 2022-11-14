@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxStream, ObfsUdpPipe};
+use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxStream};
 
 use bytes::Bytes;
 use futures_util::TryFutureExt;
@@ -47,7 +47,7 @@ impl Multiplex {
     }
 
     /// Adds a Pipe to the Multiplex
-    pub async fn add_pipe(&self, pipe: ObfsUdpPipe) {
+    pub async fn add_pipe(&self, pipe: impl Pipe) {
         self.pipe_pool.add_pipe(pipe).await
     }
 
@@ -72,7 +72,7 @@ impl Multiplex {
 }
 
 pub struct PipePool {
-    pipes: RwLock<Vec<(Arc<ObfsUdpPipe>, smol::Task<()>)>>,
+    pipes: RwLock<Vec<(Arc<dyn Pipe>, smol::Task<()>)>>,
     size_limit: usize,
     send_incoming: Sender<Bytes>,
     recv_incoming: Receiver<Bytes>,
@@ -95,7 +95,7 @@ impl PipePool {
     }
 
     /// Adds a Pipe to the PipePool, deleting the worst-performing pipe if there are too many Pipes in the PipePool.
-    pub async fn add_pipe(&self, pipe: ObfsUdpPipe) {
+    pub async fn add_pipe(&self, pipe: impl Pipe) {
         let mut v = self.pipes.write().await;
 
         while v.len() + 1 >= self.size_limit {
@@ -137,7 +137,7 @@ impl PipePool {
     }
 }
 
-async fn pipe_associated_task(pipe: Arc<ObfsUdpPipe>, send_incoming: Sender<Bytes>) {
+async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<Bytes>) {
     loop {
         let pkt = pipe.recv().await;
         if let Ok(pkt) = pkt {

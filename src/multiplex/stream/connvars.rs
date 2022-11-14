@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    congestion::{Cubic, Highspeed},
+    congestion::{Highspeed},
     inflight::Inflight,
     MSS,
 };

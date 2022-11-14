@@ -15,7 +15,7 @@ pub use stats::*;
 
 /// Encapsulates a "pipe" that can carry datagrams along one particular path. This should almost always be used in conjunction with [crate::Multiplex].
 #[async_trait]
-pub trait Pipe {
+pub trait Pipe: Send + Sync + 'static {
     /// Sends a datagram to the other side. Should never block; if the datagram cannot be sent quickly it should simply be dropped.
     ///
     /// Datagrams of at least 65535 bytes must be accepted, but larger datagrams might not be.
@@ -33,7 +33,7 @@ mod tests {
     use std::{collections::HashSet, str, time::Duration};
 
     use anyhow::Context;
-    use async_trait::async_trait;
+    
     use bytes::Bytes;
 
     use smol_timeout::TimeoutExt;
