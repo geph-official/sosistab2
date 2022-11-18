@@ -99,6 +99,7 @@ nix= "0.23.0"
 env_logger="0.9"
 socksv5= "0.3.0"
 criterion = "0.3"
+jemallocator-global = "0.3.0"
 
 [[bench]]
 name = "my_benchmark"
