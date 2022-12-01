@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 use bitvec::{prelude::Msb0, view::BitView};
 use bytes::Bytes;
 
-use probability::prelude::Inverse;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug)]
 pub struct PipeStats {
+    pub dead: bool,
     pub loss: f64, // 0 to 1
     pub latency: Duration,
     pub jitter: Duration,
@@ -15,32 +15,41 @@ pub struct PipeStats {
 
 impl PipeStats {
     pub fn score(&self) -> u64 {
-        let threshold: f64 = 0.01;
-        let n = threshold.log(self.loss).ceil(); // number of transmissions needed so that Prob(pkt is lost) <= threshold
-        ((n * self.latency.as_secs_f64()).ln() * 1000.0) as u64
+        if self.dead {
+            u64::MAX
+        } else {
+            let threshold: f64 = 0.05;
+            let n = threshold.log(self.loss).max(1.0); // number of transmissions needed so that Prob(pkt is lost) <= threshold
+            ((n * self.latency.as_secs_f64() + self.jitter.as_secs_f64() * 3.0) * 1000.0) as u64
+        }
     }
 
     fn lerp(&self, other: Self, factor: f64) -> Self {
         let afactor = 1.0 - factor;
         Self {
+            dead: false,
             loss: self.loss * afactor + other.loss * factor,
             latency: Duration::from_secs_f64(
-                self.latency.as_secs_f64() * afactor + other.latency.as_secs_f64(),
+                self.latency.as_secs_f64() * afactor + other.latency.as_secs_f64() * factor,
             ),
             jitter: Duration::from_secs_f64(
-                self.jitter.as_secs_f64() * afactor + other.jitter.as_secs_f64(),
+                self.jitter.as_secs_f64() * afactor + other.jitter.as_secs_f64() * factor,
             ),
         }
     }
 }
 
 /// A statistics calculator.
-pub struct StatsCalculator {
+pub(crate) struct StatsCalculator {
     /// seqno => sending time
     send_time: FxHashMap<u64, Instant>,
     /// seqno => if privileged, Some(the adjusted ack time), otherwise None
     ack_time: FxHashMap<u64, Option<Instant>>,
     ack_or_nack: FxHashMap<u64, bool>,
+
+    unacked_count: usize,
+    last_ackreq: Instant,
+    last_ack: Instant,
 
     /// cached stats
     cached_stat: Option<(Instant, PipeStats)>,
@@ -58,12 +67,31 @@ impl StatsCalculator {
             send_time: Default::default(),
             ack_time: Default::default(),
             ack_or_nack: Default::default(),
+            last_ackreq: Instant::now(),
+            last_ack: Instant::now(),
+            unacked_count: 0,
             cached_stat: None,
         }
     }
 
     /// Calculates stats based on recent data.
     pub fn get_stats(&mut self) -> PipeStats {
+        // if last ackreq is sufficiently after last ack, then we're DEAD!
+        if self
+            .last_ackreq
+            .saturating_duration_since(self.last_ack)
+            .as_secs_f64()
+            > 5.0
+            && self.unacked_count > 3
+        {
+            return PipeStats {
+                dead: true,
+                loss: 0.0,
+                latency: Duration::from_secs(1000),
+                jitter: Duration::from_secs(1000),
+            };
+        }
+
         if let Some((utime, stat)) = self.cached_stat {
             if utime.elapsed() < Duration::from_secs(1) {
                 return stat;
@@ -71,14 +99,14 @@ impl StatsCalculator {
         }
         // calculate loss
         let now = Instant::now();
-        const WINDOW_SIZE: usize = 20;
+        const WINDOW_SIZE: usize = 10;
         const WINDOW_MIN_INTERVAL: Duration = Duration::from_millis(100);
 
         let mut send_time: Vec<(u64, Instant)> = self
             .send_time
             .iter()
             .filter(|(_seqno, sent_time)| {
-                now.duration_since(**sent_time) < Duration::from_secs(30)
+                now.duration_since(**sent_time) < Duration::from_secs(60)
                     && now.duration_since(**sent_time) > Duration::from_secs(2)
             })
             .map(|(s, t)| (*s, *t))
@@ -130,12 +158,21 @@ impl StatsCalculator {
             .collect();
 
         let count = latencies.len();
+        if count == 0 {
+            return PipeStats {
+                dead: true,
+                loss: 0.0,
+                latency: Duration::from_secs(1000),
+                jitter: Duration::from_secs(1000),
+            };
+        }
 
         // latency = μ(latencies)
         let latency = latencies
             .iter()
             .fold(Duration::from_millis(0), |accum, elem| accum + *elem)
             / (count).max(1) as u32;
+        log::debug!("latency sample: {:?}", latency);
 
         // jitter = σ(latencies)
         let jitter = Duration::from_secs_f64(
@@ -146,18 +183,34 @@ impl StatsCalculator {
                 .sqrt(),
         );
 
-        let stats = PipeStats {
+        let mut stats = PipeStats {
+            dead: false,
             loss,
             latency,
             jitter,
         };
         if let Some((_, old_stat)) = self.cached_stat.take() {
-            self.cached_stat = Some((Instant::now(), stats.lerp(old_stat, 0.9)));
+            stats = stats.lerp(old_stat, 0.5);
+            self.cached_stat = Some((Instant::now(), stats));
         } else {
             self.cached_stat = Some((Instant::now(), stats));
         }
-        log::warn!("STATS took {:?}", now.elapsed());
+        log::warn!(
+            "STATS ({:.2}, loss = {:.2}, latency = {:.2}ms, jitter = {:.2}ms) took {:?}",
+            stats.score(),
+            stats.loss,
+            stats.latency.as_secs_f64() * 1000.0,
+            stats.jitter.as_secs_f64() * 1000.0,
+            now.elapsed()
+        );
         stats
+    }
+
+    /// Adds a batch of acknowledgements to the StatsCalculator
+    pub fn add_ackreq(&mut self) {
+        self.unacked_count += 1;
+
+        self.last_ackreq = Instant::now();
     }
 
     /// Adds a batch of acknowledgements to the StatsCalculator
@@ -169,6 +222,8 @@ impl StatsCalculator {
         time_offset: Option<Duration>,
     ) {
         self.cleanup();
+        self.last_ack = Instant::now();
+        self.unacked_count = 0;
         if let Some(time_offset) = time_offset {
             let now = Instant::now();
             let bitmap = ack_bitmap.view_bits::<Msb0>();
@@ -207,68 +262,5 @@ impl StatsCalculator {
         self.cleanup();
         let sent_time = Instant::now();
         self.send_time.insert(seqno, sent_time);
-    }
-}
-
-/// Exponential moving average and standard deviation calculator
-#[derive(Debug, Clone)]
-pub struct EmaCalculator {
-    mean_accum: f64,
-    variance_accum: f64,
-    set: bool,
-    alpha: f64,
-}
-
-impl EmaCalculator {
-    /// Creates a new calculator with the given initial estimate and smoothing factor (which should be close to 0)
-    pub fn new(initial_mean: f64, alpha: f64) -> Self {
-        Self {
-            mean_accum: initial_mean,
-            variance_accum: initial_mean.powi(2),
-            alpha,
-            set: true,
-        }
-    }
-
-    /// Creates a new calculator with nothing set.
-    pub fn new_unset(alpha: f64) -> Self {
-        Self {
-            mean_accum: 0.0,
-            variance_accum: 0.001,
-            alpha,
-            set: false,
-        }
-    }
-
-    /// Updates the calculator with a given data point
-    pub fn update(&mut self, point: f64) {
-        if !self.set {
-            self.mean_accum = point;
-            self.variance_accum = 0.0;
-            self.set = true
-        }
-        // https://stats.stackexchange.com/questions/111851/standard-deviation-of-an-exponentially-weighted-mean
-        self.variance_accum = (1.0 - self.alpha)
-            * (self.variance_accum + self.alpha * (point - self.mean_accum).powi(2));
-        self.mean_accum = self.mean_accum * (1.0 - self.alpha) + self.alpha * point;
-    }
-
-    /// Gets a very rough approximation (normal approximation) of the given percentile
-    pub fn inverse_cdf(&self, frac: f64) -> f64 {
-        let stddev = self.variance_accum.sqrt();
-        if stddev > 0.0 {
-            let dist = probability::distribution::Gaussian::new(
-                self.mean_accum,
-                self.variance_accum.sqrt(),
-            );
-            dist.inverse(frac)
-        } else {
-            self.mean_accum
-        }
-    }
-
-    /// Gets the current mean
-    pub fn mean(&self) -> f64 {
-        self.mean_accum
     }
 }

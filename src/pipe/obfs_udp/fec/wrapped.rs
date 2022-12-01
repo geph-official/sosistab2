@@ -11,8 +11,7 @@ use reed_solomon_erasure::galois_8;
 #[derive(Debug)]
 pub struct WrappedReedSolomon {
     inner: ArcSwap<galois_8::ReedSolomon>,
-    data_shards: usize,
-    parity_shards: usize,
+
     counter: AtomicU8,
 }
 
@@ -28,8 +27,7 @@ impl WrappedReedSolomon {
         let inner = galois_8::ReedSolomon::new(data_shards.max(1), parity_shards.max(1)).unwrap();
         Self {
             inner: ArcSwap::from(Arc::new(inner)),
-            data_shards,
-            parity_shards,
+
             counter: AtomicU8::default(),
         }
     }

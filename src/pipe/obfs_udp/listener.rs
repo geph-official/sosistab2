@@ -1,34 +1,46 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
-use super::listener_table::PipeTable;
+use super::{listener_table::PipeTable, OupSecret};
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead},
-    pipe::{frame::HandshakeFrame, pipe_struct::ObfsUdpPipe},
+    pipe::obfs_udp::{frame::HandshakeFrame, ObfsUdpPipe},
     utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
+    Pipe, PipeListener,
 };
+use async_trait::async_trait;
 use bytes::Bytes;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use smol::{
-    channel::{Receiver, Sender},
-};
+use smol::channel::{Receiver, Sender};
 
-pub struct Listener {
+/// A listener for obfuscated UDP pipes.
+pub struct ObfsUdpListener {
     recv_new_pipes: Receiver<ObfsUdpPipe>,
     _task: smol::Task<()>,
 }
 
-impl Listener {
+#[async_trait]
+impl PipeListener for ObfsUdpListener {
+    async fn accept_pipe(&self) -> std::io::Result<Arc<dyn Pipe>> {
+        let pipe = self
+            .accept()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e.to_string()))?;
+        Ok(Arc::new(pipe))
+    }
+}
+
+impl ObfsUdpListener {
     /// Constructor.
-    pub fn new(listen: SocketAddr, server_long_sk: x25519_dalek::StaticSecret) -> Self {
+    pub fn new(listen: SocketAddr, server_long_sk: OupSecret) -> Self {
         let socket = new_udp_socket_bind(listen).unwrap();
         let (send_new_pipes, recv_new_pipes) = smol::channel::bounded(1000);
         let task = smolscale::spawn(async move {
             if let Err(err) = listener_loop(
                 socket.clone(),
                 send_new_pipes,
-                (&server_long_sk).into(),
-                server_long_sk,
+                server_long_sk.to_public().0,
+                server_long_sk.0,
             )
             .await
             {
@@ -136,6 +148,7 @@ async fn listener_loop(
                                     let pipe = ObfsUdpPipe::with_custom_transport(
                                         recv_downcoded,
                                         send_upcoded,
+                                        client_addr,
                                     );
                                     anyhow::Ok(pipe)
                                 };

@@ -7,5 +7,5 @@ pub async fn fastsleep(dur: Duration) {
 
 /// High performance sleep until
 pub async fn fastsleep_until(at: Instant) {
-    smol::Timer::at(at).await;
+    microsleep::until(at).await;
 }

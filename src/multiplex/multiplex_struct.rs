@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxStream};
+use crate::{multiplex::multiplex_actor, pipe::Pipe};
 
-use bytes::Bytes;
+
 use futures_util::TryFutureExt;
 use smol::{
     channel::{Receiver, Sender},
-    lock::RwLock,
 };
+
+use super::{structs::PipePool, MuxStream};
 
 /// A multiplex session over a sosistab session, implementing both reliable "streams" and unreliable messages.
 pub struct Multiplex {
@@ -68,83 +69,5 @@ impl Multiplex {
     /// Accept a reliable conn from the other end.
     pub async fn accept_conn(&self) -> std::io::Result<MuxStream> {
         self.conn_accept.recv().await.map_err(to_ioerror)
-    }
-}
-
-pub struct PipePool {
-    pipes: RwLock<Vec<(Arc<dyn Pipe>, smol::Task<()>)>>,
-    size_limit: usize,
-    send_incoming: Sender<Bytes>,
-    recv_incoming: Receiver<Bytes>,
-    _task: smol::Task<()>,
-}
-
-impl PipePool {
-    /// Creates a new instance of PipePool that reads bts from up_recv and sends them down the "best" pipe available and sends pkts from all pipes to send_incoming
-    pub fn new(size_limit: usize) -> Self {
-        let (send_incoming, recv_incoming) = smol::channel::bounded(1);
-        let pipes = RwLock::new(Vec::new());
-        let task = smolscale::spawn(async {});
-        Self {
-            pipes,
-            size_limit,
-            send_incoming,
-            recv_incoming,
-            _task: task,
-        }
-    }
-
-    /// Adds a Pipe to the PipePool, deleting the worst-performing pipe if there are too many Pipes in the PipePool.
-    pub async fn add_pipe(&self, pipe: impl Pipe) {
-        let mut v = self.pipes.write().await;
-
-        while v.len() + 1 >= self.size_limit {
-            // find the index with the worst score
-            let worst_idx = v
-                .iter()
-                .map(|(pipe, _)| pipe)
-                .enumerate()
-                .max_by_key(|(_i, pipe)| pipe.get_stats().score())
-                .map(|t| t.0)
-                .unwrap();
-            let _ = v.remove(worst_idx);
-        }
-        let arc_pipe = Arc::new(pipe);
-        let task = smolscale::spawn(pipe_associated_task(
-            arc_pipe.clone(),
-            self.send_incoming.clone(),
-        ));
-
-        v.push((arc_pipe, task))
-    }
-
-    pub async fn send(&self, pkt: Bytes) {
-        let v = self.pipes.read().await;
-        let best_pipe = v
-            .iter()
-            .map(|(pipe, _)| pipe)
-            .enumerate()
-            .min_by_key(|(_i, pipe)| pipe.get_stats().score())
-            .map(|t| t.1);
-        if let Some(best_pipe) = best_pipe {
-            best_pipe.send(pkt).await;
-        }
-    }
-
-    pub async fn recv(&self) -> anyhow::Result<Bytes> {
-        let ret = self.recv_incoming.recv().await?;
-        Ok(ret)
-    }
-}
-
-async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<Bytes>) {
-    loop {
-        let pkt = pipe.recv().await;
-        if let Ok(pkt) = pkt {
-            let _ = send_incoming.send(pkt).await;
-        } else {
-            log::warn!("STOPPING");
-            return;
-        }
     }
 }

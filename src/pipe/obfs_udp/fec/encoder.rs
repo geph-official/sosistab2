@@ -5,14 +5,14 @@ use probability::distribution::Distribution;
 
 use rustc_hash::FxHashMap;
 
-use crate::{pipe::frame::PipeFrame, utilities::batchtimer::BatchTimer};
+use crate::{pipe::obfs_udp::frame::PipeFrame, utilities::batchtimer::BatchTimer};
 
 use super::{pre_encode, wrapped::WrappedReedSolomon};
 
 // forward error correction
 pub struct FecEncoder {
     unfecked: Vec<(u64, Bytes)>,
-    burst_size: usize,
+
     timer: BatchTimer,
 }
 
@@ -20,7 +20,7 @@ impl FecEncoder {
     pub fn new(fec_timeout: Duration, burst_size: usize) -> Self {
         Self {
             unfecked: Vec::new(),
-            burst_size,
+
             timer: BatchTimer::new(fec_timeout, burst_size),
         }
     }
@@ -42,7 +42,7 @@ impl FecEncoder {
             return vec![];
         }
         // encode
-        let mut fec_encoder = FrameEncoder::new(4); // around 4 percent
+        let mut fec_encoder = FrameEncoder::new(1); // around 0.5 percent
         let first_frame_no = self.unfecked[0].0;
         let data_count = self.unfecked.len();
         let expanded = fec_encoder.encode(
@@ -160,7 +160,7 @@ impl FrameEncoder {
             }))
         .min(255 - run_len)
         .min(run_len * 2);
-        log::debug!("expand batch of {} with {} parities", run_len, result);
+        log::trace!("expand batch of {} with {} parities", run_len, result);
         result
     }
 }

@@ -1,14 +1,12 @@
 pub mod crypt;
 
 mod multiplex;
-mod pacer;
-mod timer;
 pub use multiplex::*;
+mod pacer;
 mod pipe;
+pub use pipe::*;
+mod timer;
 
 mod utilities;
 
-pub use pipe::client::connect;
-pub use pipe::listener::Listener;
-pub use pipe::*;
 // pub(crate) type SVec<T> = SmallVec<[T; 16]>;

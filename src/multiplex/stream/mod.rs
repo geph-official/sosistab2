@@ -153,6 +153,7 @@ pub(crate) enum StreamState {
 }
 use StreamState::*;
 
+#[allow(clippy::too_many_arguments)]
 async fn stream_actor(
     mut state: StreamState,
     mut recv_write: BipeReader,

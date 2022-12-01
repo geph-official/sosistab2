@@ -1,43 +1,106 @@
+mod ack;
+mod defrag;
+mod fec;
+mod frame;
+mod listener;
+mod listener_table;
+
 use crate::{
-    pipe::{defrag::Defragmenter, fec::ParitySpaceKey, frame::fragment},
-    utilities::ReplayFilter,
-    Pipe, PipeStats,
+    crypt::{triple_ecdh, Cookie, ObfsAead, CLIENT_DN_KEY, CLIENT_UP_KEY},
+    utilities::{
+        sockets::{new_udp_socket_bind, MyUdpSocket},
+        ReplayFilter,
+    },
 };
+use anyhow::Context;
 use async_trait::async_trait;
 use bytes::Bytes;
+pub use listener::ObfsUdpListener;
 use parking_lot::Mutex;
-
+use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 use smol::{
     channel::{Receiver, Sender},
     future::FutureExt,
 };
-use std::{convert::Infallible, sync::Arc, time::Duration};
-
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 /// Represents an unreliable datagram connection. Generally, this is not to be used directly, but fed into [crate::Multiplex] instances to be used as the underlying transport.
 pub struct ObfsUdpPipe {
     send_upraw: Sender<Bytes>,
     recv_downraw: Receiver<Bytes>,
     stats_calculator: Arc<Mutex<StatsCalculator>>,
     _task: smol::Task<Infallible>,
+
+    remote_addr: SocketAddr,
 }
 
 const FEC_TIMEOUT_MS: u64 = 20;
-use super::{
+use self::{
     ack::{AckRequester, AckResponder},
-    fec::{FecDecoder, FecEncoder},
-    frame::PipeFrame,
-    stats::StatsCalculator,
+    defrag::Defragmenter,
+    fec::{FecDecoder, FecEncoder, ParitySpaceKey},
+    frame::{fragment, HandshakeFrame, PipeFrame},
 };
+
+use super::{stats::StatsCalculator, Pipe, PipeStats};
 const PACKET_LIVE_TIME: Duration = Duration::from_millis(500); // placeholder
-const BURST_SIZE: usize = 40;
+const BURST_SIZE: usize = 20;
+
+/// A server public key for the obfuscated UDP pipe.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OupPublic(pub(crate) x25519_dalek::PublicKey);
+
+impl OupPublic {
+    /// Returns the bytes representation.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        self.0.as_bytes()
+    }
+
+    /// Convert from bytes.
+    pub fn from_bytes(b: [u8; 32]) -> Self {
+        Self(x25519_dalek::PublicKey::from(b))
+    }
+}
+
+/// A server secret key for the obfuscated UDP pipe.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct OupSecret(pub(crate) x25519_dalek::StaticSecret);
+
+impl OupSecret {
+    /// Returns the bytes representation.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    /// Convert from bytes.
+    pub fn from_bytes(b: [u8; 32]) -> Self {
+        Self(x25519_dalek::StaticSecret::from(b))
+    }
+
+    /// Generate.
+    pub fn generate() -> Self {
+        Self(x25519_dalek::StaticSecret::new(OsRng {}))
+    }
+
+    /// Convert to a public key.
+    pub fn to_public(&self) -> OupPublic {
+        OupPublic((&self.0).into())
+    }
+}
 
 impl ObfsUdpPipe {
-    /// Creates a new Pipe that receives messages from `recv_downcoded` and send messages to `send_upcoded`. This should only be used if you are creating your own underlying transport; otherwise use the functions provided in this crate to create Pipes backed by an obfuscated, packet loss-resistant UDP transport.
+    /// Creates a new Pipe that receives messages from `recv_downcoded` and send messages to `send_upcoded`. This should only be used if you are creating your own underlying, UDP-like transport; otherwise use the functions provided in this crate to create Pipes backed by an obfuscated, packet loss-resistant UDP transport.
     ///
     /// The caller must arrange to drain the other end of `send_upcoded` promptly; otherwise the Pipe itself will get stuck.
     pub fn with_custom_transport(
         recv_downcoded: Receiver<PipeFrame>,
         send_upcoded: Sender<PipeFrame>,
+        remote_addr: SocketAddr,
     ) -> Self {
         let (send_upraw, recv_upraw) = smol::channel::bounded(10000);
         let (send_downraw, recv_downraw) = smol::channel::bounded(10000);
@@ -56,6 +119,127 @@ impl ObfsUdpPipe {
             recv_downraw,
             stats_calculator,
             _task: smolscale::spawn(pipe_loop_future),
+            remote_addr,
+        }
+    }
+
+    /// Establishes a pipe to the server_addr, using the obfuscated UDP transport.
+    pub async fn connect(
+        server_addr: SocketAddr,
+        server_pk: OupPublic,
+    ) -> anyhow::Result<ObfsUdpPipe> {
+        let socket =
+            new_udp_socket_bind("[::]:0".parse().unwrap()).context("could not bind udp socket")?;
+
+        // do the handshake
+        // generate pk-sk pairs for encryption after the session is established
+        let my_long_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
+        let my_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
+        let cookie = Cookie::new(server_pk.0);
+        // construct the ClientHello message
+        let client_hello = HandshakeFrame::ClientHello {
+            long_pk: (&my_long_sk).into(),
+            eph_pk: (&my_eph_sk).into(),
+            version: 4,
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+        }
+        .to_bytes();
+        // encrypt the ClientHello message
+        let init_enc = ObfsAead::new(&cookie.generate_c2s());
+        let client_hello = init_enc.encrypt(&client_hello);
+        // send the ClientHello
+        socket.send_to(&client_hello, server_addr).await?;
+
+        // wait for the server's response
+        let mut ctext_resp = [0u8; 2048];
+        let (n, _) = socket
+            .recv_from(&mut ctext_resp)
+            .await
+            .context("can't read response from server")?;
+        let ctext_resp = &ctext_resp[..n];
+        // decrypt the server's response
+        let init_dec = ObfsAead::new(&cookie.generate_s2c());
+        let ptext_resp = init_dec.decrypt(ctext_resp)?;
+        let deser_resp = HandshakeFrame::from_bytes(&ptext_resp)?;
+        if let HandshakeFrame::ServerHello {
+            long_pk,
+            eph_pk,
+            resume_token,
+        } = deser_resp
+        {
+            log::debug!("***** server hello received, calculating stuff ******");
+            // finish off the handshake
+            let client_resp =
+                init_enc.encrypt(&HandshakeFrame::ClientResume { resume_token }.to_bytes());
+            socket.send_to(&client_resp, server_addr).await?;
+
+            // create a pipe
+            let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
+            let (send_downcoded, recv_downcoded) = smol::channel::unbounded();
+            let pipe =
+                ObfsUdpPipe::with_custom_transport(recv_downcoded, send_upcoded, server_addr);
+
+            // start background encrypting/decrypting + forwarding task
+            let shared_secret = triple_ecdh(&my_long_sk, &my_eph_sk, &long_pk, &eph_pk);
+            log::debug!("CLIENT shared_secret: {:?}", shared_secret);
+            smolscale::spawn(client_loop(
+                recv_upcoded,
+                send_downcoded,
+                socket,
+                server_addr,
+                shared_secret,
+            ))
+            .detach();
+
+            Ok(pipe)
+        } else {
+            anyhow::bail!("server sent unrecognizable message")
+        }
+    }
+}
+
+async fn client_loop(
+    recv_upcoded: Receiver<PipeFrame>,
+    send_downcoded: Sender<PipeFrame>,
+    socket: MyUdpSocket,
+    server_addr: SocketAddr,
+    shared_secret: blake3::Hash,
+) {
+    let up_key = blake3::keyed_hash(CLIENT_UP_KEY, shared_secret.as_bytes());
+    let dn_key = blake3::keyed_hash(CLIENT_DN_KEY, shared_secret.as_bytes());
+    let enc = ObfsAead::new(up_key.as_bytes());
+    let dec = ObfsAead::new(dn_key.as_bytes());
+
+    loop {
+        let res: anyhow::Result<()> = async {
+            let up_loop = async {
+                loop {
+                    let msg = recv_upcoded.recv().await?;
+                    // log::debug!("serverbound: {:?}", msg);
+                    let msg = stdcode::serialize(&msg)?;
+                    let enc_msg = enc.encrypt(&msg);
+                    socket.send_to(&enc_msg, server_addr).await?;
+                }
+            };
+
+            up_loop
+                .race(async {
+                    let mut buf = [0u8; 65536];
+                    loop {
+                        let (n, _) = socket.recv_from(&mut buf).await?;
+                        log::trace!("got {} bytes from server", n);
+                        let dn_msg = &buf[..n];
+                        let dec_msg = dec.decrypt(dn_msg)?;
+
+                        let deser_msg = stdcode::deserialize(&dec_msg)?;
+                        send_downcoded.send(deser_msg).await?;
+                    }
+                })
+                .await
+        }
+        .await;
+        if let Err(err) = res {
+            log::error!("client loop error: {:?}", err);
         }
     }
 }
@@ -78,6 +262,14 @@ impl Pipe for ObfsUdpPipe {
     fn get_stats(&self) -> PipeStats {
         self.stats_calculator.lock().get_stats()
     }
+
+    fn protocol(&self) -> &str {
+        "obfsudp-1"
+    }
+
+    fn peer_addr(&self) -> String {
+        self.remote_addr.to_string()
+    }
 }
 
 /// Main processing loop for the Pipe
@@ -97,9 +289,6 @@ async fn pipe_loop(
     let mut replay_filter = ReplayFilter::default();
     let mut out_frag_buff = Vec::new();
 
-    // the number of packets that we sent, but did not send an ack request for.
-    let mut sent_without_ack_request = 0;
-
     loop {
         let loss = stats_calculator.lock().get_stats().loss;
         let event = Event::unack_timeout(&mut ack_client)
@@ -107,8 +296,6 @@ async fn pipe_loop(
             .or(Event::new_in_packet(&recv_downcoded))
             .or(Event::new_out_payload(&recv_upraw))
             .await;
-
-        // dbg!(sent_without_ack_request);
 
         if let Ok(event) = event {
             match event {
@@ -128,8 +315,6 @@ async fn pipe_loop(
                             body: bts,
                         };
                         let _ = send_upcoded.send(msg).await;
-
-                        sent_without_ack_request += 1;
                     }
                 }
                 Event::NewInPacket(pipe_frame) => match pipe_frame {
@@ -180,6 +365,7 @@ async fn pipe_loop(
                         first_ack,
                         last_ack,
                     } => {
+                        log::trace!("responding to ack request {first_ack} to {last_ack}");
                         let acks = ack_responder.construct_acks(first_ack, last_ack);
                         for ack in acks {
                             let _ = send_upcoded.send(ack).await;
@@ -187,12 +373,10 @@ async fn pipe_loop(
                     }
                 },
                 Event::UnackTimeout(ack_req) => {
-                    if let PipeFrame::AckRequest {
-                        first_ack,
-                        last_ack,
-                    } = &ack_req
-                    {
-                        sent_without_ack_request -= (last_ack - first_ack) as usize;
+                    if let PipeFrame::AckRequest { .. } = &ack_req {
+                        stats_calculator.lock().add_ackreq();
+                        log::trace!("*** SENDING ACK REQUEST ***");
+
                         let _ = send_upcoded.send(ack_req).await;
                     }
                 } // send ack request

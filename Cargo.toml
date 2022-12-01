@@ -39,7 +39,7 @@ smolscale= "0.3.16"
 futures-intrusive = "0.5.0"
 async-trait= "0.1.52"
 dashmap= "5.0.0"
-smol-timeout= "0.6.0"
+smol-timeout = "0.6.0"
 # futures-timer= "3.0.2"
 nonzero_ext= "0.3.0"
 tracing={ version = "0.1.29", features = ["log"] }
@@ -75,6 +75,13 @@ futures-timer = "3.0.2"
 tachyonix = "0.2.0"
 future-utils = "0.12.1"
 stdcode = "0.1.13"
+# microsleep = "0.1.13"
+microsleep = {path="../microsleep"}
+
+async-native-tls = {version="0.4.0", features=["vendored"]}
+native-tls = "0.2.11"
+subtle = "2.4.1"
+rcgen = "0.10.0"
 # fastudp = "0.1.6"
 # fastudp = "0.1.6"
 # sliding_extrema = "0.1.4"

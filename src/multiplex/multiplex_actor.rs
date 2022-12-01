@@ -9,8 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{sync::Arc, time::Duration};
 
 use crate::multiplex::structs::Message;
-use crate::MuxStream;
-use crate::PipePool;
+
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
     utilities::ReplayFilter,
@@ -18,7 +17,8 @@ use crate::{
 
 use super::{
     stream::{StreamBack, StreamState},
-    structs::{OuterMessage, RelKind},
+    structs::{OuterMessage, PipePool, RelKind},
+    MuxStream,
 };
 
 pub async fn multiplex(

@@ -43,11 +43,11 @@ impl AckResponder {
                 let l = range.last().unwrap_or(first);
                 // create a bitvec that internally uses a Vec<u8>, filled with 0s, with the smallest number of u8s necessary to contain l-f bits (i.e. ceiling((l-f) * 8))
                 // Msb0 here means that the most significant bit of each u8 represents the "first" bit.
-                let mut bitmap_underlying = vec![0u8; ((l - f + 7) / 8) as usize];
+                let mut bitmap_underlying = vec![0u8; ((l - f + 8) / 8) as usize];
                 let bitmap = BitSlice::<_, Msb0>::from_slice_mut(&mut bitmap_underlying);
 
                 let mut time_offset = None;
-                for i in f..l {
+                for i in f..=l {
                     let val = self.received_map.contains_key(&(i as u64));
                     if val && time_offset.is_none() {
                         let pkt_received_time = self.received_map.get(&(i as u64)).unwrap(); // unwrap will never fail because we only enter this block if map contains i as key

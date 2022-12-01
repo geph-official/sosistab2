@@ -23,7 +23,7 @@ impl BatchTimer {
     }
 
     /// Waits until either a certain number of [Self::increment] calls has happened, or a certain amount of time has elapsed, since the last call to [Self::reset] or the construction of this object.
-    pub async fn wait(&mut self) {
+    pub async fn wait(&self) {
         if self.count == 0 {
             // println!("count is 0 so the timer does not fire");
             smol::future::pending().await

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::EmaCalculator;
+use crate::utilities::EmaCalculator;
 
 pub struct RttCalculator {
     inner: EmaCalculator,

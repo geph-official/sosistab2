@@ -15,7 +15,11 @@ use crate::{
     utilities::MyFutureExt,
 };
 
-use super::{congestion::Highspeed, inflight::Inflight, MSS};
+use super::{
+    congestion::{Cubic, Highspeed},
+    inflight::Inflight,
+    MSS,
+};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
@@ -56,8 +60,8 @@ impl Default for ConnVars {
             // next_pace_time: Instant::now(),
             lost_seqnos: BTreeSet::new(),
             last_loss: None,
-            // cc: Box::new(Cubic::new(0.7, 0.4)),
-            cc: Box::new(Highspeed::new(1)),
+            cc: Box::new(Cubic::new(0.7, 0.4)),
+            // cc: Box::new(Highspeed::new(1)),
             pacer: Pacer::new(Duration::from_millis(1)),
             // cc: Box::new(Trivial::new(300)),
         }
@@ -79,6 +83,7 @@ enum ConnVarEvt {
 
 impl ConnVars {
     /// Process a *single* event. Errors out when the thing should be closed.
+    #[allow(clippy::too_many_arguments)]
     pub async fn process_one(
         &mut self,
         stream_id: u16,
@@ -276,10 +281,10 @@ impl ConnVars {
         Ok(())
     }
 
-    /// Changes the congestion-control algorithm.
-    pub fn change_cc(&mut self, algo: impl CongestionControl + Send + 'static) {
-        self.cc = Box::new(algo)
-    }
+    // /// Changes the congestion-control algorithm.
+    // pub fn change_cc(&mut self, algo: impl CongestionControl + Send + 'static) {
+    //     self.cc = Box::new(algo)
+    // }
 
     /// Gets the next event.
     async fn next_event(
