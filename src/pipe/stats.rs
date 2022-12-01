@@ -81,7 +81,7 @@ impl StatsCalculator {
             .last_ackreq
             .saturating_duration_since(self.last_ack)
             .as_secs_f64()
-            > 5.0
+            > 1.0
             && self.unacked_count > 3
         {
             return PipeStats {

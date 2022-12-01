@@ -40,7 +40,7 @@ impl ObfsTlsPipe {
     pub(crate) fn new(inner: TlsStream<TcpStream>, peer_addr: SocketAddr) -> Self {
         let pings_outstanding = Arc::new(AtomicUsize::new(0));
         let inner = async_dup::Arc::new(async_dup::Mutex::new(inner));
-        let (send_write, recv_write) = smol::channel::bounded(1000);
+        let (send_write, recv_write) = smol::channel::bounded(50);
         let _task = smolscale::spawn(send_loop(
             pings_outstanding.clone(),
             recv_write,
@@ -117,6 +117,7 @@ impl Pipe for ObfsTlsPipe {
             let _ = self
                 .send_write
                 .try_send(InnerMessage::Normal(Bytes::copy_from_slice(chunk)));
+            smol::future::yield_now().await;
         }
     }
 
@@ -129,7 +130,7 @@ impl Pipe for ObfsTlsPipe {
                 InnerMessage::Normal(b) => return Ok(b),
                 InnerMessage::Pong(timestamp) => {
                     let now = START_INSTANT.elapsed().as_millis() as u64;
-                    let ping = dbg!(Duration::from_millis(now.saturating_sub(timestamp)));
+                    let ping = Duration::from_millis(now.saturating_sub(timestamp));
                     self.pings_outstanding.store(0, Ordering::SeqCst);
                     let mut pings = self.pings.write();
                     pings.push_back(ping);
@@ -163,7 +164,7 @@ impl Pipe for ObfsTlsPipe {
                 .sqrt(),
         );
         PipeStats {
-            dead: self.pings_outstanding.load(Ordering::SeqCst) > 10,
+            dead: self.pings_outstanding.load(Ordering::SeqCst) > 3,
             loss: 0.0,
             latency,
             jitter,

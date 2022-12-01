@@ -159,7 +159,7 @@ impl PipePool {
     pub async fn send(&self, pkt: Bytes) {
         let bb = self.last_pipe.lock().as_ref().map(|(k, v)| (k.clone(), *v));
         if let Some((last, time)) = bb {
-            if time.elapsed() < Duration::from_millis(100) {
+            if time.elapsed() < Duration::from_millis(400) {
                 last.send(pkt).await;
                 return;
             }
@@ -173,7 +173,7 @@ impl PipePool {
             .iter()
             .map(|(pipe, _)| pipe.clone())
             .enumerate()
-            .min_by_key(|(_i, pipe)| dbg!(pipe.get_stats().score()))
+            .min_by_key(|(_i, pipe)| pipe.get_stats().score())
             .map(|t| t.1);
         if let Some(best_pipe) = best_pipe {
             log::debug!(
@@ -200,7 +200,7 @@ async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<Bytes>)
             // these are invalid messages anyway
             if pkt[..] == b"!!ping!!"[..] {
                 // in this case, we just reflect back a pong
-                log::debug!("*** GOT PING ***");
+
                 pipe.send(Bytes::from_static(b"!!pong!!")).await;
             } else if pkt[..] != b"!!pong!!"[..] {
                 let _ = send_incoming.send(pkt).await;
