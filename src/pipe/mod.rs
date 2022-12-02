@@ -24,10 +24,13 @@ pub trait Pipe: Send + Sync + 'static {
     /// Returns Pipe statistics
     fn get_stats(&self) -> PipeStats;
 
-    /// Return a string slice that identifies the protocol.
+    /// Return a static string slice that identifies the protocol.
     fn protocol(&self) -> &str;
 
-    /// Return a protocol-specific address identifying the otherside.
+    /// Return a static string slice that contains arbitrary metadata, set by the peer.
+    fn peer_metadata(&self) -> &str;
+
+    /// Return a protocol-specific address identifying the other side.
     fn peer_addr(&self) -> String;
 }
 
@@ -47,6 +50,10 @@ impl<P: Pipe + ?Sized, T: Deref<Target = P> + Send + Sync + 'static> Pipe for T 
 
     fn protocol(&self) -> &str {
         self.deref().protocol()
+    }
+
+    fn peer_metadata(&self) -> &str {
+        self.deref().peer_metadata()
     }
 
     fn peer_addr(&self) -> String {

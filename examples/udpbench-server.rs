@@ -4,13 +4,13 @@ use bytes::Bytes;
 use futures_util::AsyncWriteExt;
 use rand::SeedableRng;
 use sosistab2::{
-    Multiplex, ObfsTlsListener, PipeListener, {ObfsUdpListener, OupSecret},
+    Multiplex, MuxSecret, ObfsTlsListener, PipeListener, {ObfsUdpListener, ObfsUdpSecret},
 };
 
 fn main() {
     env_logger::init();
-    let mux = Arc::new(Multiplex::new(x25519_dalek::StaticSecret::new(
-        rand::thread_rng(),
+    let mux = Arc::new(Multiplex::new(MuxSecret::from_bytes(
+        x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
     )));
     {
         let mux = mux.clone();
@@ -29,7 +29,7 @@ fn main() {
         })
         .detach();
     }
-    let server_sk = OupSecret::from_bytes(
+    let server_sk = ObfsUdpSecret::from_bytes(
         x25519_dalek::StaticSecret::new(rand_chacha::ChaCha8Rng::seed_from_u64(0)).to_bytes(),
     );
     let sk2 = server_sk;

@@ -81,7 +81,10 @@ pub enum HandshakeFrame {
 
     /// Frame sent from client to server to either signal roaming, or complete an initial handshake. This is globally encrypted.
     /// Clients should send a ClientResume every time they suspect that their IP has changed.
-    ClientResume { resume_token: Bytes },
+    ClientResume {
+        resume_token: Bytes,
+        metadata: String,
+    },
 }
 
 impl HandshakeFrame {

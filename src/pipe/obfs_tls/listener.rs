@@ -58,23 +58,34 @@ async fn tls_listen_loop(
         let send_pipe = send_pipe.clone();
         let cookie = cookie.clone();
         smolscale::spawn(async move {
-            let mut accepted = acceptor
-                .accept(client)
+            let negotiate = async {
+                let mut accepted = acceptor.accept(client).await?;
+                log::debug!("accepted a TLS connection");
+                // check that the other side knows about the cookie. we don't need anything fancy if we trust tls
+                if !cookie.is_empty() {
+                    let mut buffer = vec![0u8; cookie.len()];
+                    accepted.read_exact(&mut buffer).await?;
+                    if !(bool::from(buffer[..].ct_eq(&cookie[..]))) {
+                        anyhow::bail!("cookie wrong")
+                    }
+                }
+                log::debug!("cookie read successfully");
+                // then read the metadata, which is prepended by a u32be length
+                let mut metadata_length = [0u8; 4];
+                accepted.read_exact(&mut metadata_length).await?;
+                let mut metadata_buff = vec![0u8; u32::from_be_bytes(metadata_length) as usize];
+                accepted.read_exact(&mut metadata_buff).await?;
+                // construct the pipe and send it on
+                anyhow::Ok(ObfsTlsPipe::new(
+                    accepted,
+                    client_addr,
+                    &String::from_utf8_lossy(&metadata_buff),
+                ))
+            };
+            let pipe = negotiate
                 .timeout(Duration::from_secs(10))
                 .await
                 .context("timeout")??;
-            log::debug!("accepted a TLS connection");
-            // check that the other side knows about the cookie. we don't need anything fancy if we trust tls
-            if !cookie.is_empty() {
-                let mut buffer = vec![0u8; cookie.len()];
-                accepted.read_exact(&mut buffer).await?;
-                if buffer[..].ct_eq(&cookie[..]).into() {
-                    anyhow::bail!("cookie wrong")
-                }
-            }
-            log::debug!("cookie read successfully");
-            // construct the pipe and send it on
-            let pipe = ObfsTlsPipe::new(accepted, client_addr);
             let _ = send_pipe.try_send(pipe);
             anyhow::Ok(())
         })

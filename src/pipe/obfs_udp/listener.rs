@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use super::{listener_table::PipeTable, OupSecret};
+use super::{listener_table::PipeTable, ObfsUdpSecret};
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead},
     pipe::obfs_udp::{frame::HandshakeFrame, ObfsUdpPipe},
@@ -32,7 +32,7 @@ impl PipeListener for ObfsUdpListener {
 
 impl ObfsUdpListener {
     /// Constructor.
-    pub fn new(listen: SocketAddr, server_long_sk: OupSecret) -> Self {
+    pub fn new(listen: SocketAddr, server_long_sk: ObfsUdpSecret) -> Self {
         let socket = new_udp_socket_bind(listen).unwrap();
         let (send_new_pipes, recv_new_pipes) = smol::channel::bounded(1000);
         let task = smolscale::spawn(async move {
@@ -129,17 +129,25 @@ async fn listener_loop(
                                     client_addr
                                 );
                             }
-                            HandshakeFrame::ClientResume { resume_token } => {
+                            HandshakeFrame::ClientResume {
+                                resume_token,
+                                metadata,
+                            } => {
                                 let fallible = async {
                                     let token_info = TokenInfo::decrypt(&token_key, &resume_token)?;
                                     let (send_upcoded, recv_upcoded) = smol::channel::bounded(100);
                                     let (send_downcoded, recv_downcoded) =
                                         smol::channel::bounded(100);
+                                    // mix the metadata with the session key
+                                    let real_session_key = blake3::keyed_hash(
+                                        blake3::hash(metadata.as_bytes()).as_bytes(),
+                                        &token_info.sess_key,
+                                    );
                                     table.add_entry(
                                         client_addr,
                                         recv_upcoded,
                                         send_downcoded,
-                                        &token_info.sess_key,
+                                        real_session_key.as_bytes(),
                                     );
                                     log::debug!(
                                         "SERVER shared_secret: {:?}",
@@ -149,6 +157,7 @@ async fn listener_loop(
                                         recv_downcoded,
                                         send_upcoded,
                                         client_addr,
+                                        &metadata,
                                     );
                                     anyhow::Ok(pipe)
                                 };

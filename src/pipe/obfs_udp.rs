@@ -37,6 +37,8 @@ pub struct ObfsUdpPipe {
     _task: smol::Task<Infallible>,
 
     remote_addr: SocketAddr,
+
+    peer_metadata: String,
 }
 
 const FEC_TIMEOUT_MS: u64 = 20;
@@ -53,9 +55,9 @@ const BURST_SIZE: usize = 20;
 
 /// A server public key for the obfuscated UDP pipe.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct OupPublic(pub(crate) x25519_dalek::PublicKey);
+pub struct ObfsUdpPublic(pub(crate) x25519_dalek::PublicKey);
 
-impl OupPublic {
+impl ObfsUdpPublic {
     /// Returns the bytes representation.
     pub fn as_bytes(&self) -> &[u8; 32] {
         self.0.as_bytes()
@@ -69,9 +71,9 @@ impl OupPublic {
 
 /// A server secret key for the obfuscated UDP pipe.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct OupSecret(pub(crate) x25519_dalek::StaticSecret);
+pub struct ObfsUdpSecret(pub(crate) x25519_dalek::StaticSecret);
 
-impl OupSecret {
+impl ObfsUdpSecret {
     /// Returns the bytes representation.
     pub fn to_bytes(&self) -> [u8; 32] {
         self.0.to_bytes()
@@ -88,8 +90,8 @@ impl OupSecret {
     }
 
     /// Convert to a public key.
-    pub fn to_public(&self) -> OupPublic {
-        OupPublic((&self.0).into())
+    pub fn to_public(&self) -> ObfsUdpPublic {
+        ObfsUdpPublic((&self.0).into())
     }
 }
 
@@ -101,6 +103,7 @@ impl ObfsUdpPipe {
         recv_downcoded: Receiver<PipeFrame>,
         send_upcoded: Sender<PipeFrame>,
         remote_addr: SocketAddr,
+        peer_metadata: &str,
     ) -> Self {
         let (send_upraw, recv_upraw) = smol::channel::bounded(10000);
         let (send_downraw, recv_downraw) = smol::channel::bounded(10000);
@@ -120,13 +123,15 @@ impl ObfsUdpPipe {
             stats_calculator,
             _task: smolscale::spawn(pipe_loop_future),
             remote_addr,
+            peer_metadata: peer_metadata.into(),
         }
     }
 
     /// Establishes a pipe to the server_addr, using the obfuscated UDP transport.
     pub async fn connect(
         server_addr: SocketAddr,
-        server_pk: OupPublic,
+        server_pk: ObfsUdpPublic,
+        metadata: &str,
     ) -> anyhow::Result<ObfsUdpPipe> {
         let socket =
             new_udp_socket_bind("[::]:0".parse().unwrap()).context("could not bind udp socket")?;
@@ -169,25 +174,38 @@ impl ObfsUdpPipe {
         {
             log::debug!("***** server hello received, calculating stuff ******");
             // finish off the handshake
-            let client_resp =
-                init_enc.encrypt(&HandshakeFrame::ClientResume { resume_token }.to_bytes());
+            let client_resp = init_enc.encrypt(
+                &HandshakeFrame::ClientResume {
+                    resume_token,
+                    metadata: metadata.into(),
+                }
+                .to_bytes(),
+            );
             socket.send_to(&client_resp, server_addr).await?;
 
             // create a pipe
             let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
             let (send_downcoded, recv_downcoded) = smol::channel::unbounded();
-            let pipe =
-                ObfsUdpPipe::with_custom_transport(recv_downcoded, send_upcoded, server_addr);
+            let pipe = ObfsUdpPipe::with_custom_transport(
+                recv_downcoded,
+                send_upcoded,
+                server_addr,
+                metadata,
+            );
 
             // start background encrypting/decrypting + forwarding task
             let shared_secret = triple_ecdh(&my_long_sk, &my_eph_sk, &long_pk, &eph_pk);
             log::debug!("CLIENT shared_secret: {:?}", shared_secret);
+            let real_sess_key = blake3::keyed_hash(
+                blake3::hash(metadata.as_bytes()).as_bytes(),
+                shared_secret.as_bytes(),
+            );
             smolscale::spawn(client_loop(
                 recv_upcoded,
                 send_downcoded,
                 socket,
                 server_addr,
-                shared_secret,
+                real_sess_key,
             ))
             .detach();
 
@@ -240,6 +258,7 @@ async fn client_loop(
         .await;
         if let Err(err) = res {
             log::error!("client loop error: {:?}", err);
+            return;
         }
     }
 }
@@ -269,6 +288,10 @@ impl Pipe for ObfsUdpPipe {
 
     fn peer_addr(&self) -> String {
         self.remote_addr.to_string()
+    }
+
+    fn peer_metadata(&self) -> &str {
+        &self.peer_metadata
     }
 }
 

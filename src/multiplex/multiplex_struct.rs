@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use crate::{multiplex::multiplex_actor, pipe::Pipe};
-
+use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxSecret};
 
 use futures_util::TryFutureExt;
-use smol::{
-    channel::{Receiver, Sender},
-};
+use smol::channel::{Receiver, Sender};
 
 use super::{structs::PipePool, MuxStream};
 
@@ -24,7 +21,7 @@ fn to_ioerror<T: Into<Box<dyn std::error::Error + Send + Sync>>>(val: T) -> std:
 
 impl Multiplex {
     /// Creates a new multiplexed Pipe
-    pub fn new(my_long_sk: x25519_dalek::StaticSecret) -> Self {
+    pub fn new(my_long_sk: MuxSecret) -> Self {
         let pipe_pool = Arc::new(PipePool::new(10)); // placeholder value
         let (conn_open, conn_open_recv) = smol::channel::unbounded();
         let (conn_accept_send, conn_accept) = smol::channel::unbounded();
@@ -33,7 +30,7 @@ impl Multiplex {
                 pipe_pool.clone(),
                 conn_open_recv,
                 conn_accept_send,
-                my_long_sk,
+                my_long_sk.0,
             )
             .unwrap_or_else(|e| {
                 panic!("oh no the multiplex actor RETURNED?! {:?}", e);

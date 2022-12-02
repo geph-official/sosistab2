@@ -32,12 +32,18 @@ pub struct ObfsTlsPipe {
     pings: RwLock<VecDeque<Duration>>,
     pings_outstanding: Arc<AtomicUsize>,
 
+    peer_metadata: String,
+
     _task: smol::Task<anyhow::Result<()>>,
 }
 
 impl ObfsTlsPipe {
     /// Create a new pipe.
-    pub(crate) fn new(inner: TlsStream<TcpStream>, peer_addr: SocketAddr) -> Self {
+    pub(crate) fn new(
+        inner: TlsStream<TcpStream>,
+        peer_addr: SocketAddr,
+        peer_metadata: &str,
+    ) -> Self {
         let pings_outstanding = Arc::new(AtomicUsize::new(0));
         let inner = async_dup::Arc::new(async_dup::Mutex::new(inner));
         let (send_write, recv_write) = smol::channel::bounded(50);
@@ -52,6 +58,7 @@ impl ObfsTlsPipe {
             peer_addr,
             pings: Default::default(),
             pings_outstanding,
+            peer_metadata: peer_metadata.into(),
             _task,
         }
     }
@@ -62,6 +69,7 @@ impl ObfsTlsPipe {
         tls_hostname: &str,
         tls_conf_builder: native_tls::TlsConnectorBuilder,
         cookie: Bytes,
+        peer_metadata: &str,
     ) -> std::io::Result<Self> {
         let connector = async_native_tls::TlsConnector::from(tls_conf_builder);
         let connection = TcpStream::connect(remote_addr).await?;
@@ -70,7 +78,13 @@ impl ObfsTlsPipe {
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionReset, e))?;
         connection.write_all(&cookie).await?;
-        Ok(Self::new(connection, remote_addr))
+        eprintln!("wrote cookie {:?}", cookie);
+        connection
+            .write_all(&(peer_metadata.len() as u32).to_be_bytes())
+            .await?;
+        connection.write_all(peer_metadata.as_bytes()).await?;
+        connection.flush().await?;
+        Ok(Self::new(connection, remote_addr, peer_metadata))
     }
 }
 
@@ -177,5 +191,9 @@ impl Pipe for ObfsTlsPipe {
 
     fn peer_addr(&self) -> String {
         self.peer_addr.to_string()
+    }
+
+    fn peer_metadata(&self) -> &str {
+        &self.peer_metadata
     }
 }

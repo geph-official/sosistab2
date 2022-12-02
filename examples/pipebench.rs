@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use smol::prelude::*;
-use sosistab2::{Multiplex, ObfsUdpPipe};
+use sosistab2::{Multiplex, MuxSecret, ObfsUdpPipe};
 
 use std::time::Instant;
 
@@ -13,16 +13,22 @@ fn main() {
             alice_recv_downcoded,
             alice_send_upcoded,
             "0.0.0.0:0".parse().unwrap(),
+            "",
         );
         let bob = ObfsUdpPipe::with_custom_transport(
             bob_recv_downcoded,
             bob_send_upcoded,
             "0.0.0.0:0".parse().unwrap(),
+            "",
         );
 
-        let alice_mux = Multiplex::new(x25519_dalek::StaticSecret::new(rand::thread_rng()));
+        let alice_mux = Multiplex::new(MuxSecret::from_bytes(
+            x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
+        ));
         alice_mux.add_pipe(alice).await;
-        let bob_mux = Multiplex::new(x25519_dalek::StaticSecret::new(rand::thread_rng()));
+        let bob_mux = Multiplex::new(MuxSecret::from_bytes(
+            x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
+        ));
         bob_mux.add_pipe(bob).await;
 
         smolscale::spawn(async move {

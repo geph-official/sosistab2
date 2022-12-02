@@ -99,7 +99,7 @@ impl StatsCalculator {
         }
         // calculate loss
         let now = Instant::now();
-        const WINDOW_SIZE: usize = 10;
+        const WINDOW_SIZE: usize = 100;
         const WINDOW_MIN_INTERVAL: Duration = Duration::from_millis(100);
 
         let mut send_time: Vec<(u64, Instant)> = self
@@ -140,8 +140,8 @@ impl StatsCalculator {
                 }
             }
         }
-        let qualified_loss = lost_qualified as f64 / (0.1 + total_qualified as f64);
-        let total_loss = lost as f64 / (0.1 + total as f64);
+        let qualified_loss = (lost_qualified as f64 + 0.1) / (0.1 + total_qualified as f64);
+        let total_loss = (lost as f64 + 0.1) / (0.1 + total as f64);
         let loss = total_loss.min(qualified_loss).min(0.3);
         // calculate latency & jitter
 
@@ -248,12 +248,12 @@ impl StatsCalculator {
     }
 
     fn cleanup(&mut self) {
-        if self.send_time.len() > 100_000 {
+        if self.send_time.len() > 30_000 {
             // cut down to half
             let largest = self.send_time.keys().copied().max().unwrap_or_default();
-            self.send_time.retain(|k, _| largest - k < 50_000);
-            self.ack_time.retain(|k, _| largest - k < 50_000);
-            self.ack_or_nack.retain(|k, _| largest - k < 50_000);
+            self.send_time.retain(|k, _| largest - k < 15_000);
+            self.ack_time.retain(|k, _| largest - k < 15_000);
+            self.ack_or_nack.retain(|k, _| largest - k < 15_000);
         }
     }
 
