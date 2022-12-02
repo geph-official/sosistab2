@@ -75,8 +75,8 @@ futures-timer = "3.0.2"
 tachyonix = "0.2.0"
 future-utils = "0.12.1"
 stdcode = "0.1.13"
-# microsleep = "0.1.13"
-microsleep = {path="../microsleep"}
+microsleep = "0.1.13"
+#microsleep = {path="../microsleep"}
 
 async-native-tls = {version="0.4.0", features=["vendored"]}
 native-tls = "0.2.11"

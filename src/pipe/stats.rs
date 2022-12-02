@@ -47,6 +47,9 @@ pub(crate) struct StatsCalculator {
     ack_time: FxHashMap<u64, Option<Instant>>,
     ack_or_nack: FxHashMap<u64, bool>,
 
+    total_qualified: f64,
+    lost_qualified: f64,
+
     unacked_count: usize,
     last_ackreq: Instant,
     last_ack: Instant,
@@ -69,6 +72,8 @@ impl StatsCalculator {
             ack_or_nack: Default::default(),
             last_ackreq: Instant::now(),
             last_ack: Instant::now(),
+            lost_qualified: 0.0,
+            total_qualified: 0.0,
             unacked_count: 0,
             cached_stat: None,
         }
