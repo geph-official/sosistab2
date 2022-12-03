@@ -25,15 +25,15 @@ fn main() {
         config
             .danger_accept_invalid_certs(true)
             .danger_accept_invalid_hostnames(true);
-        let pipe2 =
-            ObfsTlsPipe::connect(server_addr, "helloworld.com", config, Bytes::new(), "foo")
-                .await
-                .unwrap();
+        // let pipe2 =
+        //     ObfsTlsPipe::connect(server_addr, "helloworld.com", config, Bytes::new(), "foo")
+        //         .await
+        //         .unwrap();
         let mux = Multiplex::new(MuxSecret::from_bytes(
             x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
         ));
         mux.add_pipe(pipe1).await;
-        mux.add_pipe(pipe2).await;
+        // mux.add_pipe(pipe2).await;
         let mut conn = mux.open_conn(None).await.unwrap();
         let start = Instant::now();
         for count in 0u64.. {

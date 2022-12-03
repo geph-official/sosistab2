@@ -47,9 +47,6 @@ pub(crate) struct StatsCalculator {
     ack_time: FxHashMap<u64, Option<Instant>>,
     ack_or_nack: FxHashMap<u64, bool>,
 
-    total_qualified: f64,
-    lost_qualified: f64,
-
     unacked_count: usize,
     last_ackreq: Instant,
     last_ack: Instant,
@@ -72,8 +69,6 @@ impl StatsCalculator {
             ack_or_nack: Default::default(),
             last_ackreq: Instant::now(),
             last_ack: Instant::now(),
-            lost_qualified: 0.0,
-            total_qualified: 0.0,
             unacked_count: 0,
             cached_stat: None,
         }
@@ -146,7 +141,7 @@ impl StatsCalculator {
             }
         }
         let qualified_loss = (lost_qualified as f64 + 0.1) / (0.1 + total_qualified as f64);
-        let total_loss = (lost as f64 + 0.1) / (0.1 + total as f64);
+        let total_loss = (lost as f64) / (0.1 + total as f64);
         let loss = total_loss.min(qualified_loss).min(0.3);
         // calculate latency & jitter
 
@@ -164,12 +159,14 @@ impl StatsCalculator {
 
         let count = latencies.len();
         if count == 0 {
-            return PipeStats {
+            let stats = PipeStats {
                 dead: true,
                 loss: 0.0,
                 latency: Duration::from_secs(1000),
                 jitter: Duration::from_secs(1000),
             };
+            self.cached_stat = Some((Instant::now(), stats));
+            return stats;
         }
 
         // latency = μ(latencies)
@@ -253,12 +250,12 @@ impl StatsCalculator {
     }
 
     fn cleanup(&mut self) {
-        if self.send_time.len() > 30_000 {
+        if self.send_time.len() > 10_000 {
             // cut down to half
             let largest = self.send_time.keys().copied().max().unwrap_or_default();
-            self.send_time.retain(|k, _| largest - k < 15_000);
-            self.ack_time.retain(|k, _| largest - k < 15_000);
-            self.ack_or_nack.retain(|k, _| largest - k < 15_000);
+            self.send_time.retain(|k, _| largest - k < 5_000);
+            self.ack_time.retain(|k, _| largest - k < 5_000);
+            self.ack_or_nack.retain(|k, _| largest - k < 5_000);
         }
     }
 

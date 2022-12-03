@@ -1,9 +1,7 @@
 use anyhow::Context;
 
 use moka::sync::Cache;
-use smol::{
-    channel::{Receiver, Sender},
-};
+use smol::channel::{Receiver, Sender};
 use std::{net::SocketAddr, sync::Arc};
 
 use crate::{
@@ -82,7 +80,7 @@ impl PipeTable {
         match try_fwd.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                log::debug!(
+                log::warn!(
                     "trying all entries because initial decryption failed: {:?}",
                     err
                 );

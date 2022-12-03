@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -108,7 +109,7 @@ impl<T: Clone> Reorderer<T> {
 
 #[allow(clippy::type_complexity)]
 pub struct PipePool {
-    pipes: RwLock<Vec<(Arc<dyn Pipe>, smol::Task<()>)>>,
+    pipes: RwLock<VecDeque<(Arc<dyn Pipe>, smol::Task<()>)>>,
     size_limit: usize,
     send_incoming: Sender<Bytes>,
     recv_incoming: Receiver<Bytes>,
@@ -120,7 +121,7 @@ impl PipePool {
     /// Creates a new instance of PipePool that reads bts from up_recv and sends them down the "best" pipe available and sends pkts from all pipes to send_incoming
     pub fn new(size_limit: usize) -> Self {
         let (send_incoming, recv_incoming) = smol::channel::bounded(1);
-        let pipes = RwLock::new(Vec::new());
+        let pipes = RwLock::new(VecDeque::new());
         let task = smolscale::spawn(async {});
         Self {
             pipes,
@@ -136,24 +137,16 @@ impl PipePool {
     pub async fn add_pipe(&self, pipe: impl Pipe) {
         let mut v = self.pipes.write().await;
 
-        while v.len() + 1 >= self.size_limit {
-            // find the index with the worst score
-            let worst_idx = v
-                .iter()
-                .map(|(pipe, _)| pipe.clone())
-                .enumerate()
-                .max_by_key(|(_i, pipe)| pipe.get_stats().score())
-                .map(|t| t.0)
-                .unwrap();
-            let _ = v.remove(worst_idx);
-        }
         let arc_pipe = Arc::new(pipe);
         let task = smolscale::spawn(pipe_associated_task(
             arc_pipe.clone(),
             self.send_incoming.clone(),
         ));
 
-        v.push((arc_pipe, task))
+        v.push_back((arc_pipe, task));
+        if v.len() > 10 {
+            v.pop_front();
+        }
     }
 
     pub async fn send(&self, pkt: Bytes) {

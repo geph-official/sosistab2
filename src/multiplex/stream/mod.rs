@@ -12,7 +12,7 @@ mod congestion;
 mod connvars;
 mod inflight;
 
-pub const MSS: usize = 32768; // pretty large MSS; rely on underlying transport to fragment
+pub const MSS: usize = 30000; // pretty large MSS; rely on underlying transport to fragment
 const MAX_WAIT_SECS: u64 = 60;
 
 #[derive(Clone)]
