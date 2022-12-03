@@ -83,6 +83,7 @@ native-tls = "0.2.11"
 subtle = "2.4.1"
 rcgen = "0.10.0"
 smol_str = "0.1.23"
+derivative = "2.2.0"
 
 
 [profile.dev]

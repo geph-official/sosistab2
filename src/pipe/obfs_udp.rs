@@ -1,15 +1,15 @@
-mod ack;
 mod defrag;
 mod fec;
 mod frame;
 mod listener;
 mod listener_table;
+mod stats;
 
 use crate::{
     crypt::{triple_ecdh, Cookie, ObfsAead, CLIENT_DN_KEY, CLIENT_UP_KEY},
     utilities::{
         sockets::{new_udp_socket_bind, MyUdpSocket},
-        ReplayFilter,
+        BatchTimer, ReplayFilter,
     },
 };
 use anyhow::Context;
@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 pub use listener::ObfsUdpListener;
 use parking_lot::Mutex;
+use priority_queue::PriorityQueue;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use smol::{
@@ -24,10 +25,11 @@ use smol::{
     future::FutureExt,
 };
 use std::{
+    cmp::Reverse,
     convert::Infallible,
     net::SocketAddr,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 /// Represents an unreliable datagram connection. Generally, this is not to be used directly, but fed into [crate::Multiplex] instances to be used as the underlying transport.
 pub struct ObfsUdpPipe {
@@ -43,14 +45,14 @@ pub struct ObfsUdpPipe {
 
 const FEC_TIMEOUT_MS: u64 = 20;
 use self::{
-    ack::{AckRequester, AckResponder},
     defrag::Defragmenter,
     fec::{FecDecoder, FecEncoder, ParitySpaceKey},
     frame::{fragment, HandshakeFrame, PipeFrame},
+    stats::StatsCalculator,
 };
 
-use super::{stats::StatsCalculator, Pipe, PipeStats};
-const PACKET_LIVE_TIME: Duration = Duration::from_millis(500); // placeholder
+use super::{Pipe, PipeStats};
+
 const BURST_SIZE: usize = 20;
 
 /// A server public key for the obfuscated UDP pipe.
@@ -236,6 +238,7 @@ async fn client_loop(
                     // log::debug!("serverbound: {:?}", msg);
                     let msg = stdcode::serialize(&msg)?;
                     let enc_msg = enc.encrypt(&msg);
+
                     socket.send_to(&enc_msg, server_addr).await?;
                 }
             };
@@ -304,18 +307,21 @@ async fn pipe_loop(
     stats_calculator: Arc<Mutex<StatsCalculator>>,
 ) -> Infallible {
     let mut next_seqno = 0;
-    let mut ack_responder = AckResponder::new(100000);
-    let mut ack_client = AckRequester::new(PACKET_LIVE_TIME);
+
     let mut fec_encoder = FecEncoder::new(Duration::from_millis(FEC_TIMEOUT_MS), BURST_SIZE);
     let mut fec_decoder = FecDecoder::new(100); // arbitrary size
     let mut defrag = Defragmenter::default();
     let mut replay_filter = ReplayFilter::default();
     let mut out_frag_buff = Vec::new();
+    let mut ack_timer = BatchTimer::new(Duration::from_millis(500), 100);
+    let mut probably_lost_incoming = PriorityQueue::new();
+    let mut unacked_incoming = Vec::new();
+    let mut last_incoming_seqno = 0;
 
     loop {
         let loss = stats_calculator.lock().get_stats().loss;
-        let event = Event::unack_timeout(&mut ack_client)
-            .or(Event::fec_timeout(&mut fec_encoder, loss))
+        let event = Event::fec_timeout(&mut fec_encoder, loss)
+            .or(Event::ack_timeout(&mut ack_timer))
             .or(Event::new_in_packet(&recv_downcoded))
             .or(Event::new_out_payload(&recv_upraw))
             .await;
@@ -330,24 +336,33 @@ async fn pipe_loop(
 
                         next_seqno += 1;
                         fec_encoder.add_unfecked(seqno, bts.clone());
-                        ack_client.add_unacked(seqno);
+
                         stats_calculator.lock().add_sent(seqno);
 
-                        let msg = PipeFrame::Data {
-                            frame_no: seqno,
-                            body: bts,
-                        };
+                        let msg = PipeFrame::Data { seqno, body: bts };
                         let _ = send_upcoded.send(msg).await;
                     }
                 }
                 Event::NewInPacket(pipe_frame) => match pipe_frame {
-                    PipeFrame::Data { frame_no, body } => {
-                        if replay_filter.add(frame_no) {
-                            ack_responder.add_ack(frame_no);
-                            fec_decoder.insert_data(frame_no, body.clone());
-                            if let Some(whole) = defrag.insert(frame_no, body) {
+                    PipeFrame::Data { seqno, body } => {
+                        if replay_filter.add(seqno) {
+                            fec_decoder.insert_data(seqno, body.clone());
+                            if let Some(whole) = defrag.insert(seqno, body) {
                                 let _ = send_downraw.try_send(whole); // TODO why??
                             }
+                            if seqno > last_incoming_seqno + 1 {
+                                log::debug!("gap in sequence numbers: {}", seqno);
+                                for gap_seqno in (last_incoming_seqno + 1)..seqno {
+                                    probably_lost_incoming.push(
+                                        gap_seqno,
+                                        Reverse(Instant::now() + Duration::from_millis(500)),
+                                    );
+                                }
+                            }
+                            last_incoming_seqno = seqno;
+                            ack_timer.increment();
+                            unacked_incoming.push((seqno, Instant::now()));
+                            probably_lost_incoming.remove(&seqno);
                         }
                     }
                     PipeFrame::Parity {
@@ -376,33 +391,47 @@ async fn pipe_loop(
                             }
                         }
                     }
-                    PipeFrame::Acks {
-                        first_ack,
-                        last_ack,
-                        ack_bitmap: acks,
-                        time_offset,
-                    } => stats_calculator
-                        .lock()
-                        .add_acks(first_ack, last_ack, acks, time_offset),
-                    PipeFrame::AckRequest {
-                        first_ack,
-                        last_ack,
-                    } => {
-                        log::trace!("responding to ack request {first_ack} to {last_ack}");
-                        let acks = ack_responder.construct_acks(first_ack, last_ack);
-                        for ack in acks {
-                            let _ = send_upcoded.send(ack).await;
+                    PipeFrame::Acks { acks, naks } => {
+                        let mut stats = stats_calculator.lock();
+                        for (seqno, offset) in acks {
+                            stats.add_ack(seqno, Duration::from_millis(offset as _));
+                        }
+                        for seqno in naks {
+                            stats.add_nak(seqno);
                         }
                     }
                 },
-                Event::UnackTimeout(ack_req) => {
-                    if let PipeFrame::AckRequest { .. } = &ack_req {
-                        stats_calculator.lock().add_ackreq();
-                        log::trace!("*** SENDING ACK REQUEST ***");
 
-                        let _ = send_upcoded.send(ack_req).await;
-                    }
-                } // send ack request
+                Event::AckTimeout => {
+                    ack_timer.reset();
+                    log::trace!(
+                        "ack timer fired, must send back {} acks",
+                        unacked_incoming.len()
+                    );
+                    let naks = {
+                        let mut vv = Vec::new();
+                        let now = Instant::now();
+                        while let Some((seqno, lost_date)) = probably_lost_incoming.pop() {
+                            if lost_date.0 < now {
+                                vv.push(seqno);
+                            } else {
+                                probably_lost_incoming.push(seqno, lost_date);
+                                break;
+                            }
+                        }
+                        vv
+                    };
+                    let _ = send_upcoded
+                        .send(PipeFrame::Acks {
+                            acks: unacked_incoming
+                                .drain(..)
+                                .map(|(k, v)| (k, v.elapsed().as_millis() as _))
+                                .collect(),
+                            naks,
+                        })
+                        .await;
+                }
+
                 Event::FecTimeout(parity_frames) => {
                     log::trace!("FecTimeout; sending {} parities", parity_frames.len());
                     for parity_frame in parity_frames {
@@ -418,8 +447,8 @@ async fn pipe_loop(
 enum Event {
     NewOutPayload(Bytes),
     NewInPacket(PipeFrame), // either data or parity or ack request packet or acks
-    UnackTimeout(PipeFrame),
     FecTimeout(Vec<PipeFrame>),
+    AckTimeout,
 }
 
 impl Event {
@@ -432,15 +461,14 @@ impl Event {
         let in_pkt = recv.recv().await?;
         Ok(Event::NewInPacket(in_pkt))
     }
-
-    pub async fn unack_timeout(ack_client: &mut AckRequester) -> anyhow::Result<Self> {
-        let req = ack_client.wait_ack_request().await;
-        Ok(Event::UnackTimeout(req))
-    }
-
     pub async fn fec_timeout(fec_machine: &mut FecEncoder, loss: f64) -> anyhow::Result<Self> {
         let parity = fec_machine.wait_parity(loss).await;
 
         Ok(Event::FecTimeout(parity))
+    }
+
+    pub async fn ack_timeout(ack_timer: &mut BatchTimer) -> anyhow::Result<Self> {
+        ack_timer.wait().await;
+        Ok(Event::AckTimeout)
     }
 }

@@ -23,7 +23,7 @@ pub fn fragment(buff: Bytes, out: &mut Vec<Bytes>) {
 pub enum PipeFrame {
     Data {
         /// Strictly incrementing counter of frames. Must never repeat.
-        frame_no: u64,
+        seqno: u64,
         /// Body
         body: Bytes,
     },
@@ -36,15 +36,10 @@ pub enum PipeFrame {
         body: Bytes,
     },
     Acks {
-        first_ack: u64,
-        last_ack: u64,
-        ack_bitmap: Bytes,
-        time_offset: Option<Duration>, // could be that we didn't receive *any* of the packets whose acks are requested
-    },
-
-    AckRequest {
-        first_ack: u64,
-        last_ack: u64,
+        /// acked seqno + time offset in milliseconds
+        acks: Vec<(u64, u32)>,
+        /// negative acknowledgements
+        naks: Vec<u64>,
     },
 }
 

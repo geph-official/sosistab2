@@ -1,14 +1,13 @@
 mod obfs_tls;
 mod obfs_udp;
-use std::{ops::Deref, sync::Arc};
+use std::{fmt::Display, ops::Deref, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use obfs_tls::*;
 pub use obfs_udp::*;
-mod stats;
+
 use smol::future::FutureExt;
-pub use stats::*;
 
 /// Abstracts over any "pipe" that can carry datagrams along one particular path. This should almost always be used in conjunction with [crate::Multiplex].
 #[async_trait]
@@ -87,5 +86,40 @@ pub struct OrPipeListener<T: PipeListener + Sized, U: PipeListener + Sized> {
 impl<T: PipeListener, U: PipeListener> PipeListener for OrPipeListener<T, U> {
     async fn accept_pipe(&self) -> std::io::Result<Arc<dyn Pipe>> {
         self.left.accept_pipe().or(self.right.accept_pipe()).await
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PipeStats {
+    pub dead: bool,
+    pub loss: f64, // 0 to 1
+    pub latency: Duration,
+    pub jitter: Duration,
+}
+
+impl PipeStats {
+    pub fn score(&self) -> u64 {
+        log::debug!("current stats: {:?}", self);
+        if self.dead {
+            u64::MAX
+        } else {
+            let threshold: f64 = 0.05;
+            let n = threshold.log(self.loss).max(1.0); // number of transmissions needed so that Prob(pkt is lost) <= threshold
+            ((n * self.latency.as_secs_f64() + self.jitter.as_secs_f64() * 3.0) * 1000.0) as u64
+        }
+    }
+
+    fn lerp(&self, other: Self, factor: f64) -> Self {
+        let afactor = 1.0 - factor;
+        Self {
+            dead: false,
+            loss: self.loss * afactor + other.loss * factor,
+            latency: Duration::from_secs_f64(
+                self.latency.as_secs_f64() * afactor + other.latency.as_secs_f64() * factor,
+            ),
+            jitter: Duration::from_secs_f64(
+                self.jitter.as_secs_f64() * afactor + other.jitter.as_secs_f64() * factor,
+            ),
+        }
     }
 }
