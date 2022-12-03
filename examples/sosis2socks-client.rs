@@ -10,7 +10,7 @@ use native_tls::TlsConnector;
 use rand::Rng;
 use smol::net::TcpListener;
 use smol_timeout::TimeoutExt;
-use sosistab2::{Multiplex, MuxSecret, ObfsTlsPipe, ObfsUdpPipe, ObfsUdpPublic};
+use sosistab2::{Multiplex, MuxPublic, MuxSecret, ObfsTlsPipe, ObfsUdpPipe, ObfsUdpPublic};
 
 #[derive(FromArgs)]
 /// Connects to a sosis2socks server, exposing a socks5 on localhost.
@@ -37,8 +37,16 @@ fn main() -> anyhow::Result<()> {
     smolscale::block_on(async {
         let peer_metadata = format!("sess-{}", rand::thread_rng().gen::<u128>());
         let args: Args = argh::from_env();
-        // TODO validate server PK!!!
-        let mux = Arc::new(Multiplex::new(MuxSecret::generate()));
+
+        let mux = Arc::new(Multiplex::new(
+            MuxSecret::generate(),
+            Some(MuxPublic::from_bytes(
+                hex::decode(&args.mux_pk)?
+                    .try_into()
+                    .ok()
+                    .context("cannot fit")?,
+            )),
+        ));
         smolscale::spawn(socks_loop(mux.clone())).detach();
         loop {
             let fallible = async {
@@ -61,7 +69,7 @@ fn main() -> anyhow::Result<()> {
                     .await
                     .context("TLS timeout")??;
                     eprintln!("successfully made TLS to {}", args.connect);
-                    mux.add_pipe(tls).await;
+                    mux.add_pipe(tls);
                     eprintln!("added!");
                 } else {
                     let udp = ObfsUdpPipe::connect(
@@ -78,7 +86,7 @@ fn main() -> anyhow::Result<()> {
                     .await
                     .context("UDP timeout")??;
                     eprintln!("successfully made UDP to {}", args.connect);
-                    mux.add_pipe(udp).await;
+                    mux.add_pipe(udp);
                     eprintln!("added!");
                 }
 

@@ -1,6 +1,6 @@
 mod obfs_tls;
 mod obfs_udp;
-use std::{fmt::Display, ops::Deref, sync::Arc, time::Duration};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::Bytes;

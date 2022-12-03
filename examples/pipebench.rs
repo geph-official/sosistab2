@@ -22,14 +22,16 @@ fn main() {
             "",
         );
 
-        let alice_mux = Multiplex::new(MuxSecret::from_bytes(
-            x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
-        ));
-        alice_mux.add_pipe(alice).await;
-        let bob_mux = Multiplex::new(MuxSecret::from_bytes(
-            x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
-        ));
-        bob_mux.add_pipe(bob).await;
+        let alice_mux = Multiplex::new(
+            MuxSecret::from_bytes(x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes()),
+            None,
+        );
+        alice_mux.add_pipe(alice);
+        let bob_mux = Multiplex::new(
+            MuxSecret::from_bytes(x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes()),
+            None,
+        );
+        bob_mux.add_pipe(bob);
 
         smolscale::spawn(async move {
             let mut conn = bob_mux.accept_conn().await.unwrap();

@@ -26,6 +26,7 @@ pub async fn multiplex(
     conn_open_recv: Receiver<(Option<String>, Sender<MuxStream>)>,
     conn_accept_send: Sender<MuxStream>,
     my_long_sk: x25519_dalek::StaticSecret,
+    real_their_long_pk: Option<x25519_dalek::PublicKey>,
 ) -> anyhow::Result<()> {
     // encryption parameters
     let my_eph_sk_send = x25519_dalek::StaticSecret::new(rand::thread_rng());
@@ -172,6 +173,12 @@ pub async fn multiplex(
                         version: _,
                         timestamp: _,
                     } => {
+                        if let Some(real) = real_their_long_pk {
+                            if real != their_long_pk {
+                                log::warn!("dropping invalid ClientHello");
+                                continue;
+                            }
+                        }
                         let recv_secret = triple_ecdh(
                             &my_long_sk,
                             &my_eph_sk_recv,
@@ -194,6 +201,12 @@ pub async fn multiplex(
                         long_pk: their_long_pk,
                         eph_pk: their_eph_pk,
                     } => {
+                        if let Some(real) = real_their_long_pk {
+                            if real != their_long_pk {
+                                log::warn!("dropping invalid ServerHello");
+                                continue;
+                            }
+                        }
                         let send_secret = triple_ecdh(
                             &my_long_sk,
                             &my_eph_sk_send,

@@ -29,11 +29,12 @@ fn main() {
         //     ObfsTlsPipe::connect(server_addr, "helloworld.com", config, Bytes::new(), "foo")
         //         .await
         //         .unwrap();
-        let mux = Multiplex::new(MuxSecret::from_bytes(
-            x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
-        ));
-        mux.add_pipe(pipe1).await;
-        // mux.add_pipe(pipe2).await;
+        let mux = Multiplex::new(
+            MuxSecret::from_bytes(x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes()),
+            None,
+        );
+        mux.add_pipe(pipe1);
+
         let mut conn = mux.open_conn(None).await.unwrap();
         let start = Instant::now();
         for count in 0u64.. {

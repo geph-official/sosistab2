@@ -5,13 +5,10 @@ use std::{
 };
 
 use bytes::Bytes;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use smol::{
-    channel::{Receiver, Sender},
-    lock::RwLock,
-};
+use smol::channel::{Receiver, Sender};
 
 use crate::Pipe;
 
@@ -133,9 +130,9 @@ impl PipePool {
         }
     }
 
-    /// Adds a Pipe to the PipePool, deleting the worst-performing pipe if there are too many Pipes in the PipePool.
-    pub async fn add_pipe(&self, pipe: impl Pipe) {
-        let mut v = self.pipes.write().await;
+    /// Adds a Pipe to the PipePool, deleting the oldest pipe if there are too many Pipes in the PipePool.
+    pub fn add_pipe(&self, pipe: impl Pipe) {
+        let mut v = self.pipes.write();
 
         let arc_pipe = Arc::new(pipe);
         let task = smolscale::spawn(pipe_associated_task(
@@ -144,7 +141,7 @@ impl PipePool {
         ));
 
         v.push_back((arc_pipe, task));
-        if v.len() > 10 {
+        if v.len() > self.size_limit {
             v.pop_front();
         }
     }
@@ -157,17 +154,22 @@ impl PipePool {
                 return;
             }
         }
-        let v = self.pipes.read().await;
-        for (pipe, _) in v.iter() {
-            pipe.send(Bytes::from_static(b"!!ping!!")).await;
-        }
 
-        let best_pipe = v
-            .iter()
-            .map(|(pipe, _)| pipe.clone())
-            .enumerate()
-            .min_by_key(|(_i, pipe)| pipe.get_stats().score())
-            .map(|t| t.1);
+        let best_pipe = {
+            let v = self.pipes.read();
+            for (pipe, _) in v.iter() {
+                let pipe = pipe.clone();
+                smolscale::spawn(async move {
+                    pipe.send(Bytes::from_static(b"!!ping!!")).await;
+                })
+                .detach();
+            }
+            v.iter()
+                .map(|(pipe, _)| pipe.clone())
+                .enumerate()
+                .min_by_key(|(_i, pipe)| pipe.get_stats().score())
+                .map(|t| t.1)
+        };
         if let Some(best_pipe) = best_pipe {
             log::debug!(
                 "best pipe is {} / {}",
@@ -175,7 +177,7 @@ impl PipePool {
                 best_pipe.protocol()
             );
             best_pipe.send(pkt).await;
-            drop(v);
+
             *self.last_pipe.lock() = Some((best_pipe.clone(), Instant::now()))
         }
     }

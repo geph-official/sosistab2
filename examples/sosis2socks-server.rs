@@ -124,11 +124,11 @@ async fn process_pipe(longterm: MuxSecret, pipe: Arc<dyn Pipe>) {
         });
 
     let (multiplex, _) = SESSION_MAP.get_with(pipe.peer_metadata().into(), || {
-        let multiplex = Arc::new(Multiplex::new(longterm));
+        let multiplex = Arc::new(Multiplex::new(longterm, None));
         let task = Arc::new(smolscale::spawn(process_mux(multiplex.clone())));
         (multiplex, task)
     });
-    multiplex.add_pipe(pipe).await;
+    multiplex.add_pipe(pipe);
 }
 
 async fn process_mux(mux: Arc<Multiplex>) -> anyhow::Result<()> {

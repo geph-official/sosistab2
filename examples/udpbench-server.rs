@@ -9,9 +9,10 @@ use sosistab2::{
 
 fn main() {
     env_logger::init();
-    let mux = Arc::new(Multiplex::new(MuxSecret::from_bytes(
-        x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes(),
-    )));
+    let mux = Arc::new(Multiplex::new(
+        MuxSecret::from_bytes(x25519_dalek::StaticSecret::new(rand::thread_rng()).to_bytes()),
+        None,
+    ));
     {
         let mux = mux.clone();
         smolscale::spawn(async move {
@@ -50,7 +51,7 @@ fn main() {
                     .unwrap();
             loop {
                 let pipe = listener.accept_pipe().await.unwrap();
-                mux.add_pipe(pipe).await;
+                mux.add_pipe(pipe);
             }
         })
         .detach();
@@ -60,7 +61,7 @@ fn main() {
         let listener = ObfsUdpListener::new("0.0.0.0:10000".parse().unwrap(), sk2);
         loop {
             let pipe = listener.accept().await.unwrap();
-            mux.add_pipe(pipe).await;
+            mux.add_pipe(pipe);
         }
     })
 }
