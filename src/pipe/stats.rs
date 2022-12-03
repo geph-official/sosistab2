@@ -159,6 +159,9 @@ impl StatsCalculator {
 
         let count = latencies.len();
         if count == 0 {
+            if let Some(existing) = self.cached_stat {
+                return existing.1;
+            }
             let stats = PipeStats {
                 dead: true,
                 loss: 0.0,

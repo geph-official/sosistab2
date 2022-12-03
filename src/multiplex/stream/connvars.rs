@@ -345,6 +345,7 @@ impl ConnVars {
                     bts.extend_from_slice(&[0; MSS]);
                     let n = recv_write.read(&mut bts).await;
                     if let Ok(n) = n {
+                        log::trace!("writing segment of {} bytes", n);
                         if n == 0 {
                             None
                         } else {

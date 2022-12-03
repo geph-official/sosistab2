@@ -73,6 +73,7 @@ impl ObfsTlsPipe {
     ) -> std::io::Result<Self> {
         let connector = async_native_tls::TlsConnector::from(tls_conf_builder);
         let connection = TcpStream::connect(remote_addr).await?;
+        connection.set_nodelay(true)?;
         let mut connection = connector
             .connect(tls_hostname, connection)
             .await
@@ -176,6 +177,11 @@ impl Pipe for ObfsTlsPipe {
                 .sum::<f64>()
                 / (pings.len().max(1) as f64))
                 .sqrt(),
+        );
+        log::debug!(
+            "TLS stats: latency = {:.2}ms, jitter = {:.2}ms",
+            latency.as_secs_f64() * 1000.0,
+            jitter.as_secs_f64() * 1000.0
         );
         PipeStats {
             dead: self.pings_outstanding.load(Ordering::SeqCst) > 3,
