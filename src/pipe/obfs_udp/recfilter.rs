@@ -3,7 +3,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 
@@ -24,7 +23,7 @@ impl RecentFilter {
     pub fn recently_seen(&mut self, val: &[u8]) -> bool {
         // clean up first
         while let Some(to_delete) = self.expiry.front().and_then(|(expiry, hash)| {
-            if expiry.elapsed() > Duration::from_secs(600) {
+            if expiry.elapsed() > Duration::from_secs(120) {
                 Some(*hash)
             } else {
                 None

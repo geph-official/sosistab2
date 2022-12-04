@@ -108,18 +108,4 @@ impl PipeStats {
             ((n * self.latency.as_secs_f64() + self.jitter.as_secs_f64() * 3.0) * 1000.0) as u64
         }
     }
-
-    fn lerp(&self, other: Self, factor: f64) -> Self {
-        let afactor = 1.0 - factor;
-        Self {
-            dead: false,
-            loss: self.loss * afactor + other.loss * factor,
-            latency: Duration::from_secs_f64(
-                self.latency.as_secs_f64() * afactor + other.latency.as_secs_f64() * factor,
-            ),
-            jitter: Duration::from_secs_f64(
-                self.jitter.as_secs_f64() * afactor + other.jitter.as_secs_f64() * factor,
-            ),
-        }
-    }
 }

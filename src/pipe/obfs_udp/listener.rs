@@ -1,9 +1,14 @@
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use super::{listener_table::PipeTable, ObfsUdpSecret};
 use crate::{
     crypt::{triple_ecdh, ObfsAead, SymmetricFromAsymmetric},
     pipe::obfs_udp::{frame::HandshakeFrame, recfilter::REPLAY_FILTER, ObfsUdpPipe},
+    timer::fastsleep,
     utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
     Pipe, PipeListener,
 };
@@ -80,6 +85,8 @@ async fn listener_loop(
     };
 
     loop {
+        log::warn!("WAITING 30 seconds before starting listener loop...");
+        fastsleep(Duration::from_secs(30)).await;
         let mut buf = [0u8; 2048];
         let (n, client_addr) = socket.recv_from(&mut buf).await?;
         let pkt = &buf[..n];
@@ -107,7 +114,7 @@ async fn listener_loop(
                                     .unwrap()
                                     .as_secs();
                                 log::debug!("my time {current_timestamp}, their time {timestamp}");
-                                if current_timestamp.abs_diff(timestamp) > 60 {
+                                if current_timestamp.abs_diff(timestamp) > 30 {
                                     log::warn!("time too skewed, so skipping");
                                     continue;
                                 }
