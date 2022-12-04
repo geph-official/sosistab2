@@ -1,14 +1,21 @@
-# Sosistab - an obfuscated datagram transport for horrible networks
+# Sosistab2 - an obfuscated datagram transport for horrible networks
 
-[![](https://img.shields.io/crates/v/sosistab)](https://crates.io/crates/sosistab)
-![](https://img.shields.io/crates/l/sosistab)
+[![](https://img.shields.io/crates/v/sosistab2)](https://crates.io/crates/sosistab2)
+![](https://img.shields.io/crates/l/sosistab2)
 
-Sosistab is an unreliable, obfuscated datagram transport over UDP and TCP, designed to achieve high performance even in extremely bad networks. Sosistab can be used for applications like anti-censorship VPNs, reliable communication over radios, game networking, etc. It also comes with a QUIC-like multiplex protocol that implements multiple TCP-like reliable streams over the base sosistab layer. This multiplex protocol is ideal for applications requiring a mix of reliable and unreliable traffic. For example, VPNs might do signaling and authentication over reliable streams, while passing packets through unreliable datagrams.
+Sosistab2 is a vaguely QUIC-like datagram transport framework. Over a single `Multiplex` session, it multiplexes streams that support both reliable TCP-like bytestreams and UDP-like unreliable datagrams.
 
-Features:
+The cool feature, and key innovation over the [legacy sosistab protocol](https://github.com/geph-official/sosistab), is the same `Multiplex` can be backed by _multiple_ "pipes". Pipes implement the `Pipe` trait and are a simple abstraction over an unreliable datagram transport. A `Multiplex` will intelligently decide what pipe to send its traffic down, and automatically avoids non-functional pipes. The `Multiplex` also maintains end-to-end encryption using chacha20-poly1305 with a triple-x25519 key exchange, and does not trust the `Pipe`s for confidentiality, integrity, or authentication in any way.
 
-- Strong, state-of-the-art (obfs4-like) obfuscation. Sosistab servers cannot be detected by active probing, and Sosistab traffic is reasonably indistinguishable from random. We also make a best-effort attempt at hiding side-channels through random padding.
-- Strong yet lightweight authenticated encryption with chacha20-poly1305
-- Deniable public-key encryption with triple-x25519, with servers having long-term public keys that must be provided out-of-band. Similar to decent encrypted transports like TLS and DTLS --- but not to the whole Shadowsocks/Vmess family of protocols --- different clients have different session keys and cannot spy on each other.
-- Reed-Solomon error correction that targets a certain application packet loss level. Intelligent autotuning and dynamic batch sizes make performance much better than other FEC-based tools like udpspeeder. This lets Sosistab turns high-bandwidth, high-loss links to medium-bandwidth, low-loss links, which is generally much more useful.
-- Avoids last-mile congestive collapse but works around lossy links. Shamelessly unfair in permanently congested WANs --- but that's really their problem, not yours. In any case, permanently congested WANs are observationally identical to lossy links, and any solution for the latter will cause unfairness in the former.
+This crate comes with two `Pipe` implementations:
+
+- `ObfsUdpPipe`, an obfuscated, loss-resistant UDP transport
+  - uses an active-probing-resistant and padded (obfs4-like) obfuscation, with traffic reasonably indistinguishable from random.
+  - Reed-Solomon forward error correction that auto-adjusts to detected packet loss level and uses dynamic batch sizes, nearly eliminating all sporadic packet loss and making bad links much more usable. Packet loss calculation intelligently avoids counting "fully loaded" traffic to detect the _uncontended_ packet loss level, to avoid congestion causing increasing FEC redundancy and congestive collapse.
+- `ObfsTlsPipe`, an obfuscated TLS transport
+  - uses configurable `native-tls` connectors to mitigate TLS fingerprinting. `native-tls` uses OS-native TLS libraries and is least likely to be fingerprinted.
+  - padding is used to obfuscate packet size signatures
+  - servers are active-probing resistant by means of a preshared secret cookie that must be transmitted within the TLS session.
+  - no attempt is made to imitate browser HTTPS. the intention is to imitate "unknown TLS-based protocols" --- blocking all unclassifiable TLS protocols is likely to cause massive collateral damage beyond blocking obfs4-like high entropy protocols, considering that it's the most common way for new software to trasmit encrypted traffic.
+
+Other crates may also implement the `Pipe` interface. For instance, we are currently working on a thoroughly browser-imitating HTTP(S) transport.
