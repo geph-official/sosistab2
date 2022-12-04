@@ -75,7 +75,7 @@ futures-timer = "3.0.2"
 tachyonix = "0.2.0"
 future-utils = "0.12.1"
 stdcode = "0.1.13"
-microsleep = "0.1.13"
+microsleep = {version="0.1.13", optional=true}
 #microsleep = {path="../microsleep"}
 
 async-native-tls = {version="0.4.0", features=["vendored"]}
@@ -106,7 +106,7 @@ nix= "0.23.0"
 env_logger="0.9"
 socksv5= "0.3.0"
 criterion = "0.3"
-jemallocator-global = "0.3.0"
+
 dirs="4"
 
 

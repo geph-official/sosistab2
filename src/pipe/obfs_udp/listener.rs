@@ -1,9 +1,9 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 
 use super::{listener_table::PipeTable, ObfsUdpSecret};
 use crate::{
-    crypt::{triple_ecdh, Cookie, ObfsAead},
-    pipe::obfs_udp::{frame::HandshakeFrame, ObfsUdpPipe},
+    crypt::{triple_ecdh, ObfsAead, SymmetricFromAsymmetric},
+    pipe::obfs_udp::{frame::HandshakeFrame, recfilter::REPLAY_FILTER, ObfsUdpPipe},
     utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
     Pipe, PipeListener,
 };
@@ -67,7 +67,7 @@ async fn listener_loop(
     server_long_pk: x25519_dalek::PublicKey,
     server_long_sk: x25519_dalek::StaticSecret,
 ) -> anyhow::Result<()> {
-    let cookie = Cookie::new(server_long_pk);
+    let cookie = SymmetricFromAsymmetric::new(server_long_pk);
     let init_dec = ObfsAead::new(&cookie.generate_c2s());
     let init_enc = ObfsAead::new(&cookie.generate_s2c());
 
@@ -90,6 +90,10 @@ async fn listener_loop(
             match init_dec.decrypt(pkt) {
                 Ok(ptext) => {
                     log::debug!("it really was a handshake!");
+                    if REPLAY_FILTER.lock().recently_seen(&ptext) {
+                        log::warn!("skipping packet catched by the replay filter!");
+                        continue;
+                    }
                     if let Ok(msg) = stdcode::deserialize::<HandshakeFrame>(&ptext) {
                         match msg {
                             HandshakeFrame::ClientHello {
@@ -98,6 +102,16 @@ async fn listener_loop(
                                 version,
                                 timestamp,
                             } => {
+                                let current_timestamp = SystemTime::now()
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs();
+                                log::debug!("my time {current_timestamp}, their time {timestamp}");
+                                if current_timestamp.abs_diff(timestamp) > 60 {
+                                    log::warn!("time too skewed, so skipping");
+                                    continue;
+                                }
+
                                 let server_eph_sk =
                                     x25519_dalek::StaticSecret::new(rand::thread_rng());
 

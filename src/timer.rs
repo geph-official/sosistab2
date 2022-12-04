@@ -7,5 +7,9 @@ pub async fn fastsleep(dur: Duration) {
 
 /// High performance sleep until
 pub async fn fastsleep_until(at: Instant) {
+    #[cfg(feature = "microsleep")]
     microsleep::until(at).await;
+
+    #[cfg(not(feature = "microsleep"))]
+    smol::Timer::at(at).await;
 }

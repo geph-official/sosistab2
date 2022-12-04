@@ -1,13 +1,12 @@
 use std::{net::SocketAddr, time::Instant};
 
-use bytes::Bytes;
 use futures_util::AsyncReadExt;
 use itertools::Itertools;
 use native_tls::TlsConnector;
 use rand::SeedableRng;
 
 use sosistab2::{
-    Multiplex, MuxSecret, ObfsTlsPipe, {ObfsUdpPipe, ObfsUdpSecret},
+    Multiplex, MuxSecret, {ObfsUdpPipe, ObfsUdpSecret},
 };
 
 fn main() {

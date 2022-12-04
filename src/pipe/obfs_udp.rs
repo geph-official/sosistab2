@@ -3,10 +3,11 @@ mod fec;
 mod frame;
 mod listener;
 mod listener_table;
+mod recfilter;
 mod stats;
 
 use crate::{
-    crypt::{triple_ecdh, Cookie, ObfsAead, CLIENT_DN_KEY, CLIENT_UP_KEY},
+    crypt::{triple_ecdh, ObfsAead, SymmetricFromAsymmetric, CLIENT_DN_KEY, CLIENT_UP_KEY},
     utilities::{
         sockets::{new_udp_socket_bind, MyUdpSocket},
         BatchTimer, ReplayFilter,
@@ -107,8 +108,8 @@ impl ObfsUdpPipe {
         remote_addr: SocketAddr,
         peer_metadata: &str,
     ) -> Self {
-        let (send_upraw, recv_upraw) = smol::channel::bounded(10000);
-        let (send_downraw, recv_downraw) = smol::channel::bounded(10000);
+        let (send_upraw, recv_upraw) = smol::channel::bounded(100);
+        let (send_downraw, recv_downraw) = smol::channel::bounded(100);
         let stats_calculator = Arc::new(Mutex::new(StatsCalculator::new()));
 
         let pipe_loop_future = pipe_loop(
@@ -142,7 +143,7 @@ impl ObfsUdpPipe {
         // generate pk-sk pairs for encryption after the session is established
         let my_long_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
         let my_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
-        let cookie = Cookie::new(server_pk.0);
+        let cookie = SymmetricFromAsymmetric::new(server_pk.0);
         // construct the ClientHello message
         let client_hello = HandshakeFrame::ClientHello {
             long_pk: (&my_long_sk).into(),

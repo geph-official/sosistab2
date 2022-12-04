@@ -169,23 +169,23 @@ pub enum AeadError {
 }
 
 #[derive(Debug, Clone)]
-/// Cookie is a generator of temporary symmetric keys.
-pub struct Cookie(x25519_dalek::PublicKey);
+/// A generator of symmetric keys.
+pub struct SymmetricFromAsymmetric(x25519_dalek::PublicKey);
 
-impl Cookie {
+impl SymmetricFromAsymmetric {
     /// Create a new cookie based on a public key.
-    pub fn new(pk: x25519_dalek::PublicKey) -> Cookie {
-        Cookie(pk)
+    pub fn new(pk: x25519_dalek::PublicKey) -> SymmetricFromAsymmetric {
+        SymmetricFromAsymmetric(pk)
     }
 
     /// Generate a bunch of symmetric keys given the current time, for client to server.
     pub fn generate_c2s(&self) -> [u8; 32] {
-        self.generate_temp_key("sosistab-1-c2s")
+        self.generate_temp_key("sosistab-2-c2s")
     }
 
     /// Generate a bunch of symmetric keys given the current time, for server to client.
     pub fn generate_s2c(&self) -> [u8; 32] {
-        self.generate_temp_key("sosistab-1-s2c")
+        self.generate_temp_key("sosistab-2-s2c")
     }
 
     fn generate_temp_key(&self, ctx: &str) -> [u8; 32] {
@@ -195,7 +195,7 @@ impl Cookie {
     }
 }
 
-// Two ways to get keys: triple ecdh &  server-pk-derived handshake key
+/// A triple-ECDH handshake.
 pub fn triple_ecdh(
     my_long_sk: &x25519_dalek::StaticSecret,
     my_eph_sk: &x25519_dalek::StaticSecret,

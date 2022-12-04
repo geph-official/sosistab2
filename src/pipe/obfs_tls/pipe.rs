@@ -46,7 +46,7 @@ impl ObfsTlsPipe {
     ) -> Self {
         let pings_outstanding = Arc::new(AtomicUsize::new(0));
         let inner = async_dup::Arc::new(async_dup::Mutex::new(inner));
-        let (send_write, recv_write) = smol::channel::bounded(50);
+        let (send_write, recv_write) = smol::channel::bounded(10);
         let _task = smolscale::spawn(send_loop(
             pings_outstanding.clone(),
             recv_write,
@@ -128,11 +128,10 @@ async fn send_loop(
 impl Pipe for ObfsTlsPipe {
     async fn send(&self, to_send: Bytes) {
         // TODO reuse memory of to_send
-        for chunk in to_send.chunks(30000) {
+        for chunk in to_send.chunks(60000) {
             let _ = self
                 .send_write
                 .try_send(InnerMessage::Normal(Bytes::copy_from_slice(chunk)));
-            smol::future::yield_now().await;
         }
     }
 

@@ -18,9 +18,7 @@ pub struct PipeTable {
 
 #[derive(Clone)]
 struct PipeBack {
-    recv_upcoded: Receiver<PipeFrame>,
     send_downcoded: Sender<PipeFrame>,
-    encoder: ObfsAead,
     decoder: ObfsAead,
     _task: Arc<smol::Task<()>>,
 }
@@ -51,14 +49,12 @@ impl PipeTable {
             self.table.clone(),
             self.socket.clone(),
             client_addr,
-            encoder.clone(),
-            recv_upcoded.clone(),
+            encoder,
+            recv_upcoded,
         ));
 
         let pipe_back = PipeBack {
-            recv_upcoded,
             send_downcoded,
-            encoder,
             decoder,
             _task: Arc::new(task),
         };
@@ -81,31 +77,33 @@ impl PipeTable {
         match try_fwd.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                log::warn!(
-                    "trying all entries because initial decryption failed: {:?}",
-                    err
-                );
-                // try all entries in table
-                for (key, mut back) in self.table.iter() {
-                    if let Ok(ptext) = back.decoder.decrypt(pkt) {
-                        let msg = stdcode::deserialize(&ptext)?;
-                        back.send_downcoded.send(msg).await?;
+                anyhow::bail!("error: {}", err); // roaming like this is highly DoS-vulnerable
 
-                        // update entry in table
-                        self.table.invalidate(&key);
-                        let task = smol::spawn(dn_forward_loop(
-                            self.table.clone(),
-                            self.socket.clone(),
-                            client_addr,
-                            back.encoder.clone(),
-                            back.recv_upcoded.clone(),
-                        ));
-                        back._task = Arc::new(task);
-                        self.table.insert(client_addr, back);
-                        return Ok(());
-                    };
-                }
-                anyhow::bail!("failed to match packet against any entries in the table")
+                // log::warn!(
+                //     "trying all entries because initial decryption failed: {:?}",
+                //     err
+                // );
+                // // try all entries in table
+                // for (key, mut back) in self.table.iter() {
+                //     if let Ok(ptext) = back.decoder.decrypt(pkt) {
+                //         let msg = stdcode::deserialize(&ptext)?;
+                //         back.send_downcoded.send(msg).await?;
+
+                //         // update entry in table
+                //         self.table.invalidate(&key);
+                //         let task = smol::spawn(dn_forward_loop(
+                //             self.table.clone(),
+                //             self.socket.clone(),
+                //             client_addr,
+                //             back.encoder.clone(),
+                //             back.recv_upcoded.clone(),
+                //         ));
+                //         back._task = Arc::new(task);
+                //         self.table.insert(client_addr, back);
+                //         return Ok(());
+                //     };
+                // }
+                // anyhow::bail!("failed to match packet against any entries in the table")
             }
         }
     }
