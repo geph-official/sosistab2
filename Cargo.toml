@@ -80,6 +80,7 @@ subtle = "2.4.1"
 derivative = "2.2.0"
 
 ring = "0.16.20"
+smol_str = "0.1.23"
 
 
 [profile.dev]

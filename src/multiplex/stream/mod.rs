@@ -7,6 +7,7 @@ use connvars::ConnVars;
 
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
+use smol_str::SmolStr;
 use std::{pin::Pin, sync::Arc, task::Context, task::Poll, time::Duration};
 mod congestion;
 mod connvars;
@@ -22,7 +23,7 @@ pub struct MuxStream {
     send_write_urel: Sender<Bytes>,
     recv_read: DArc<DMutex<BipeReader>>,
     recv_read_urel: Receiver<Bytes>,
-    additional_info: Option<String>,
+    additional_info: SmolStr,
 }
 
 impl MuxStream {
@@ -30,7 +31,7 @@ impl MuxStream {
         state: StreamState,
         output: Sender<Message>,
         dropper: impl FnOnce() + Send + 'static,
-        additional_info: Option<String>,
+        additional_info: SmolStr,
     ) -> (Self, StreamBack) {
         let (send_write_urel, recv_write_urel) = smol::channel::bounded(100);
         let (send_read_urel, recv_read_urel) = smol::channel::bounded(100);
@@ -71,8 +72,8 @@ impl MuxStream {
     }
 
     /// Returns the "additional info" attached to the stream.
-    pub fn additional_info(&self) -> Option<&str> {
-        self.additional_info.as_deref()
+    pub fn additional_info(&self) -> &str {
+        &self.additional_info
     }
 
     /// Shuts down the stream, causing future read and write operations to fail.
@@ -162,7 +163,7 @@ async fn stream_actor(
     send_read_urel: Sender<Bytes>,
     recv_wire_read: Receiver<Message>,
     send_wire_write: Sender<Message>,
-    additional_info: Option<String>,
+    additional_info: SmolStr,
     dropper: impl FnOnce(),
 ) -> anyhow::Result<()> {
     let _guard = scopeguard::guard((), |_| dropper());
@@ -222,12 +223,7 @@ async fn stream_actor(
                             kind: RelKind::Syn,
                             stream_id,
                             seqno: 0,
-                            payload: Bytes::copy_from_slice(
-                                additional_info
-                                    .as_ref()
-                                    .unwrap_or(&"".to_string())
-                                    .as_bytes(),
-                            ),
+                            payload: Bytes::copy_from_slice(additional_info.as_bytes()),
                         })
                         .await?;
                     SynSent {

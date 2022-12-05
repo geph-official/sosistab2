@@ -5,6 +5,7 @@ use rand::prelude::*;
 
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
+use smol_str::SmolStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{sync::Arc, time::Duration};
 
@@ -23,7 +24,7 @@ use super::{
 
 pub async fn multiplex(
     pipe_pool: Arc<PipePool>,
-    conn_open_recv: Receiver<(Option<String>, Sender<MuxStream>)>,
+    conn_open_recv: Receiver<(SmolStr, Sender<MuxStream>)>,
     conn_accept_send: Sender<MuxStream>,
     my_long_sk: x25519_dalek::StaticSecret,
     real_their_long_pk: Option<x25519_dalek::PublicKey>,
@@ -57,7 +58,7 @@ pub async fn multiplex(
     enum Event {
         RecvMsg(OuterMessage),
         SendMsg(Message),
-        ConnOpen(Option<String>, Sender<MuxStream>),
+        ConnOpen(SmolStr, Sender<MuxStream>),
         Dead(u16),
     }
 
@@ -132,9 +133,7 @@ pub async fn multiplex(
                                 kind: RelKind::Syn,
                                 stream_id,
                                 seqno: 0,
-                                payload: Bytes::copy_from_slice(
-                                    additional_data.clone().unwrap_or_default().as_bytes(),
-                                ),
+                                payload: Bytes::copy_from_slice(additional_data.as_bytes()),
                             })
                             .await
                     });
@@ -266,11 +265,7 @@ pub async fn multiplex(
                                                         let lala =
                                                             String::from_utf8_lossy(&payload)
                                                                 .to_string();
-                                                        let additional_info = if lala.is_empty() {
-                                                            None
-                                                        } else {
-                                                            Some(lala)
-                                                        };
+                                                        let additional_info = lala.into();
                                                         let reap_dead = reap_dead.clone();
                                                         let (new_conn, new_conn_back) =
                                                             MuxStream::new(

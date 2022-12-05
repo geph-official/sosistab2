@@ -4,13 +4,14 @@ use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxPublic, MuxSecret};
 
 use futures_util::TryFutureExt;
 use smol::channel::{Receiver, Sender};
+use smol_str::SmolStr;
 
 use super::{structs::PipePool, MuxStream};
 
 /// A multiplex session over a sosistab session, implementing both reliable "streams" and unreliable messages.
 pub struct Multiplex {
     pipe_pool: Arc<PipePool>,
-    conn_open: Sender<(Option<String>, Sender<MuxStream>)>,
+    conn_open: Sender<(SmolStr, Sender<MuxStream>)>,
     conn_accept: Receiver<MuxStream>,
     _task: smol::Task<()>,
 }
@@ -51,10 +52,10 @@ impl Multiplex {
     }
 
     /// Open a reliable conn to the other end.
-    pub async fn open_conn(&self, additional: Option<String>) -> std::io::Result<MuxStream> {
+    pub async fn open_conn(&self, additional: &str) -> std::io::Result<MuxStream> {
         let (send, recv) = smol::channel::unbounded();
         self.conn_open
-            .send((additional.clone(), send))
+            .send((additional.into(), send))
             .await
             .map_err(to_ioerror)?;
         if let Ok(s) = recv.recv().await {
