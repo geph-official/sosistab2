@@ -43,7 +43,7 @@ fn main() {
         .detach();
         let size = 1000;
         let to_send = Bytes::from(vec![0u8; size]);
-        let mut conn = alice_mux.open_conn(None).await.unwrap();
+        let mut conn = alice_mux.open_conn("").await.unwrap();
         loop {
             let start = Instant::now();
             for count in 0..100000 {

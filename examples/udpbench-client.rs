@@ -34,7 +34,7 @@ fn main() {
         );
         mux.add_pipe(pipe1);
 
-        let mut conn = mux.open_conn(None).await.unwrap();
+        let mut conn = mux.open_conn("").await.unwrap();
         let start = Instant::now();
         for count in 0u64.. {
             conn.read_exact(&mut [0u8; 4096]).await.unwrap();

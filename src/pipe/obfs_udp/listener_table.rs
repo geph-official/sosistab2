@@ -77,6 +77,7 @@ impl PipeTable {
         match try_fwd.await {
             Ok(()) => Ok(()),
             Err(err) => {
+                log::debug!("***** LAWL");
                 anyhow::bail!("error: {}", err); // roaming like this is highly DoS-vulnerable
 
                 // log::warn!(

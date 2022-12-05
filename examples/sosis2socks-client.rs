@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         smolscale::spawn(socks_loop(mux.clone())).detach();
         loop {
             let fallible = async {
-                if fastrand::bool() {
+                if fastrand::bool() && false {
                     let mut config = TlsConnector::builder();
                     config
                         .danger_accept_invalid_certs(true)
@@ -137,7 +137,7 @@ async fn handle_socks5(mux: Arc<Multiplex>, s5client: smol::net::TcpStream) -> a
         _ => anyhow::bail!("not supported"),
     };
     let conn = mux
-        .open_conn(Some(addr))
+        .open_conn(&addr)
         .timeout(Duration::from_secs(10))
         .await
         .context("timeout")??;

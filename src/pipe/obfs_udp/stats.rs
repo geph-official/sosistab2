@@ -47,9 +47,9 @@ impl StatsCalculator {
     /// Calculates stats based on recent data.
     pub fn get_stats(&self) -> PipeStats {
         log::trace!("calculating stats from {:?}", self);
-        let loss_total = self.lost as f64 / (self.acked + self.lost).max(1) as f64;
-        let loss_qualified =
-            self.lost_qualified as f64 / (self.acked_qualified + self.lost_qualified).max(1) as f64;
+        let loss_total = self.lost.max(1) as f64 / (self.acked + self.lost).max(1) as f64;
+        let loss_qualified = self.lost_qualified.max(1) as f64
+            / (self.acked_qualified + self.lost_qualified).max(1) as f64;
         let dead = if let (Some(first), Some(last)) = (self.first_outstanding, self.last_ack) {
             first.elapsed() > Duration::from_secs(3)
                 && last.elapsed() > Duration::from_secs(3)
@@ -59,7 +59,7 @@ impl StatsCalculator {
         };
         PipeStats {
             dead,
-            loss: loss_total.min(loss_qualified),
+            loss: loss_total.min(loss_qualified).min(0.3),
             latency: self.latency_sum / (self.acked.max(1) as u32),
             jitter: Duration::from_secs_f64(
                 (self.variance_sum / (self.acked).max(1) as f64).sqrt(),

@@ -84,9 +84,10 @@ async fn listener_loop(
         b
     };
 
+    // log::warn!("WAITING 10 seconds before starting listener loop...");
+    // fastsleep(Duration::from_secs(10)).await;
+
     loop {
-        log::warn!("WAITING 30 seconds before starting listener loop...");
-        fastsleep(Duration::from_secs(30)).await;
         let mut buf = [0u8; 2048];
         let (n, client_addr) = socket.recv_from(&mut buf).await?;
         let pkt = &buf[..n];
@@ -114,7 +115,7 @@ async fn listener_loop(
                                     .unwrap()
                                     .as_secs();
                                 log::debug!("my time {current_timestamp}, their time {timestamp}");
-                                if current_timestamp.abs_diff(timestamp) > 30 {
+                                if current_timestamp.abs_diff(timestamp) > 10 {
                                     log::warn!("time too skewed, so skipping");
                                     continue;
                                 }

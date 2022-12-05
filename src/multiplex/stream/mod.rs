@@ -13,7 +13,7 @@ mod congestion;
 mod connvars;
 mod inflight;
 
-pub const MSS: usize = 16384; // pretty large MSS; rely on underlying transport to fragment
+pub const MSS: usize = 8192; // pretty large MSS; rely on underlying transport to fragment
 const MAX_WAIT_SECS: u64 = 60;
 
 #[derive(Clone)]
@@ -35,8 +35,8 @@ impl MuxStream {
     ) -> (Self, StreamBack) {
         let (send_write_urel, recv_write_urel) = smol::channel::bounded(100);
         let (send_read_urel, recv_read_urel) = smol::channel::bounded(100);
-        let (send_write, recv_write) = bipe::bipe(MSS);
-        let (send_read, recv_read) = bipe::bipe(MSS);
+        let (send_write, recv_write) = bipe::bipe(MSS * 2);
+        let (send_read, recv_read) = bipe::bipe(MSS * 2);
         let (send_wire_read, recv_wire_read) = smol::channel::bounded(100);
         let aic = additional_info.clone();
         let _task = smolscale::spawn(async move {

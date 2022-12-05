@@ -135,15 +135,15 @@ async fn process_mux(mux: Arc<Multiplex>) -> anyhow::Result<()> {
     loop {
         let next = mux.accept_conn().await?;
         smolscale::spawn(async move {
-            if let Some(remote) = next.additional_info() {
-                let start = Instant::now();
-                eprintln!("opening connection to {}...", remote);
-                let remconn = TcpStream::connect(remote).await?;
-                eprintln!("opened connection to {} in {:?}", remote, start.elapsed());
-                smol::io::copy(remconn.clone(), next.clone())
-                    .race(smol::io::copy(next, remconn))
-                    .await?;
-            }
+            let remote = next.additional_info();
+            let start = Instant::now();
+            eprintln!("opening connection to {}...", remote);
+            let remconn = TcpStream::connect(remote).await?;
+            eprintln!("opened connection to {} in {:?}", remote, start.elapsed());
+            smol::io::copy(remconn.clone(), next.clone())
+                .race(smol::io::copy(next, remconn))
+                .await?;
+
             anyhow::Ok(())
         })
         .detach();

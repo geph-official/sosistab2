@@ -140,6 +140,7 @@ impl FrameEncoder {
 
     /// Calculates the number of repair blocks needed to properly reconstruct a run of packets.
     fn repair_len(&mut self, measured_loss: f64, run_len: usize) -> usize {
+        log::trace!("repair_len({measured_loss}, {run_len})");
         let measured_loss = (measured_loss * 255.0) as u8;
         let target_loss = self.target_loss;
         let result = (*self
