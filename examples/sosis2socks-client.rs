@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         smolscale::spawn(socks_loop(mux.clone())).detach();
         loop {
             let fallible = async {
-                if fastrand::bool() && false {
+                if fastrand::bool() {
                     let mut config = TlsConnector::builder();
                     config
                         .danger_accept_invalid_certs(true)

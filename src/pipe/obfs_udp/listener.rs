@@ -1,14 +1,9 @@
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 
 use super::{listener_table::PipeTable, ObfsUdpSecret};
 use crate::{
     crypt::{triple_ecdh, ObfsAead, SymmetricFromAsymmetric},
     pipe::obfs_udp::{frame::HandshakeFrame, recfilter::REPLAY_FILTER, ObfsUdpPipe},
-    timer::fastsleep,
     utilities::sockets::{new_udp_socket_bind, MyUdpSocket},
     Pipe, PipeListener,
 };

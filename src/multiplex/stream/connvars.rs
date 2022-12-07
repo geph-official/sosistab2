@@ -370,9 +370,10 @@ impl ConnVars {
             Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::NewPkt(recv_wire_read.recv().await?))
         };
         let final_timeout = async {
-            fastsleep(Duration::from_secs(600)).await;
+            fastsleep(Duration::from_secs(120)).await;
             anyhow::bail!("final timeout within stream actor");
-        };
+        }
+        .pending_unless(first_rto.is_some());
         let retransmit = async { anyhow::Ok(ConnVarEvt::Retransmit(first_retrans.unwrap())) }
             .pending_unless(first_retrans.is_some() && can_retransmit);
 

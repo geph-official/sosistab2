@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxPublic, MuxSecret};
 
+use concurrent_queue::ConcurrentQueue;
 use futures_util::TryFutureExt;
 use smol::channel::{Receiver, Sender};
 use smol_str::SmolStr;
@@ -13,6 +14,7 @@ pub struct Multiplex {
     pipe_pool: Arc<PipePool>,
     conn_open: Sender<(SmolStr, Sender<MuxStream>)>,
     conn_accept: Receiver<MuxStream>,
+    friends: ConcurrentQueue<Box<dyn Any + Send>>,
     _task: smol::Task<()>,
 }
 
@@ -42,8 +44,14 @@ impl Multiplex {
             pipe_pool, // placeholder
             conn_open,
             conn_accept,
+            friends: ConcurrentQueue::unbounded(),
             _task,
         }
+    }
+
+    /// Adds an arbitrary "friend" that will be dropped together with the multiplex. This is useful for managing RAII resources like tasks, tables etc that should live exactly as long as a particular multiplex.
+    pub fn add_drop_friend(&self, friend: impl Any + Send) {
+        self.friends.push(Box::new(friend)).unwrap()
     }
 
     /// Adds a Pipe to the Multiplex
