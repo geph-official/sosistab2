@@ -358,9 +358,9 @@ impl ConnVars {
                     return Ok(ConnVarEvt::Closing);
                 }
             }
-            let pacing_interval = Duration::from_secs_f64(1.0 / self.pacing_rate());
-            self.pacer.set_interval(pacing_interval);
-            self.pacer.wait_next().await;
+            // let pacing_interval = Duration::from_secs_f64(1.0 / self.pacing_rate());
+            // self.pacer.set_interval(pacing_interval);
+            // self.pacer.wait_next().await;
             Ok::<ConnVarEvt, anyhow::Error>(ConnVarEvt::NewWrite(
                 self.write_fragments.pop_front().unwrap(),
             ))
