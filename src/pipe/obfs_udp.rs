@@ -440,6 +440,9 @@ async fn pipe_loop(
                     }
                 }
             }
+        } else {
+            // stop the pipe
+            return smol::future::pending().await;
         }
     }
 }
