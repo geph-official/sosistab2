@@ -85,7 +85,7 @@ fn main() -> anyhow::Result<()> {
             hex::encode(obfsudp_secret.to_public().as_bytes())
         );
         eprintln!("obfs-tls cookie:\t{}", hex::encode(&obfstls_cookie));
-        let udp_listener = ObfsUdpListener::new(args.listen, obfsudp_secret);
+        let udp_listener = ObfsUdpListener::bind(args.listen, obfsudp_secret)?;
         let tls_listener = ObfsTlsListener::bind(args.listen, tls_config(), obfstls_cookie).await?;
         smolscale::spawn(accept_loop(mux_secret.clone(), udp_listener)).detach();
         smolscale::spawn(accept_loop(mux_secret, tls_listener)).detach();

@@ -58,7 +58,7 @@ fn main() {
     }
 
     smolscale::block_on(async move {
-        let listener = ObfsUdpListener::new("0.0.0.0:10000".parse().unwrap(), sk2);
+        let listener = ObfsUdpListener::bind("0.0.0.0:10000".parse().unwrap(), sk2).unwrap();
         loop {
             let pipe = listener.accept().await.unwrap();
             mux.add_pipe(pipe);

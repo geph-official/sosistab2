@@ -32,8 +32,8 @@ impl PipeListener for ObfsUdpListener {
 
 impl ObfsUdpListener {
     /// Constructor.
-    pub fn new(listen: SocketAddr, server_long_sk: ObfsUdpSecret) -> Self {
-        let socket = new_udp_socket_bind(listen).unwrap();
+    pub fn bind(listen: SocketAddr, server_long_sk: ObfsUdpSecret) -> std::io::Result<Self> {
+        let socket = new_udp_socket_bind(listen)?;
         let (send_new_pipes, recv_new_pipes) = smol::channel::bounded(1000);
         let task = smolscale::spawn(async move {
             if let Err(err) = listener_loop(
@@ -47,11 +47,11 @@ impl ObfsUdpListener {
                 log::error!("Oh no! The listener loop has died with an error {:?}", err);
             }
         });
-        Self {
+        Ok(Self {
             recv_new_pipes,
 
             _task: task,
-        }
+        })
     }
 
     pub async fn accept(&self) -> anyhow::Result<ObfsUdpPipe> {
