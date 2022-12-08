@@ -77,7 +77,6 @@ impl PipeTable {
         match try_fwd.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                log::debug!("***** LAWL");
                 anyhow::bail!("error: {}", err); // roaming like this is highly DoS-vulnerable
 
                 // log::warn!(
@@ -120,7 +119,6 @@ async fn dn_forward_loop(
     let r: anyhow::Result<()> = async {
         loop {
             let msg = recv_upcoded.recv().await?;
-            log::trace!("gonna send down {:?}", msg);
             let ctext = encoder.encrypt(&stdcode::serialize(&msg)?);
             socket.send_to(&ctext, client_addr).await?;
         }

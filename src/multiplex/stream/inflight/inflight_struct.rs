@@ -74,14 +74,6 @@ impl Inflight {
         self.lost_count
     }
 
-    // pub fn srtt(&self) -> Duration {
-    //     self.rtt.srtt()
-    // }
-
-    // pub fn rtt_var(&self) -> Duration {
-    //     self.rtt.rtt_var()
-    // }
-
     pub fn min_rtt(&self) -> Duration {
         self.rtt.min_rtt()
     }
@@ -89,6 +81,11 @@ impl Inflight {
     /// The total bdp of the link, in packets
     pub fn bdp(&self) -> usize {
         (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
+    }
+
+    /// The bandwidth of the link, in RTT/sec
+    pub fn delivery_rate(&self) -> f64 {
+        self.bw.delivery_rate()
     }
 
     pub fn rto(&self) -> Duration {

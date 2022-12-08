@@ -261,7 +261,7 @@ async fn client_loop(
         }
         .await;
         if let Err(err) = res {
-            log::error!("client loop error: {:?}", err);
+            log::debug!("client loop exiting: {:?}", err);
             return;
         }
     }
