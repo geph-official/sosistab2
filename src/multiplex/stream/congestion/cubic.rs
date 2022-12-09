@@ -28,7 +28,7 @@ impl Cubic {
     fn recalculate_cwnd(&mut self) {
         if let Some(last_loss) = self.last_loss {
             let kay = (self.cwnd_max * (1.0 - self.beta) / self.cee).powf(0.3333);
-            self.cwnd = (self.cee * (last_loss.elapsed().as_secs_f64() * 3.0 - kay).powi(3)
+            self.cwnd = (self.cee * (last_loss.elapsed().as_secs_f64() - kay).powi(3)
                 + self.cwnd_max)
                 .max(1.0);
         }
@@ -37,7 +37,7 @@ impl Cubic {
 
 impl CongestionControl for Cubic {
     fn cwnd(&self) -> usize {
-        (self.cwnd).max(self.bdp) as usize
+        (self.cwnd) as usize
     }
 
     fn mark_ack(&mut self, current_bdp: usize, _: usize) {
@@ -52,11 +52,9 @@ impl CongestionControl for Cubic {
     }
 
     fn mark_loss(&mut self) {
-        if self.cwnd >= self.bdp {
-            log::debug!("loss!!!!!!!!!!!!!!! => {:.2}", self.cwnd());
-            self.last_loss = Some(Instant::now());
-            self.cwnd_max = self.cwnd;
-            self.recalculate_cwnd()
-        }
+        log::debug!("loss!!!!!!!!!!!!!!! => {:.2}", self.cwnd());
+        self.last_loss = Some(Instant::now());
+        self.cwnd_max = self.cwnd;
+        self.recalculate_cwnd()
     }
 }

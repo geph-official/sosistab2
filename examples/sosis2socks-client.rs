@@ -95,7 +95,7 @@ fn main() -> anyhow::Result<()> {
             if let Err(err) = fallible.await {
                 log::warn!("error connecting: {:?}", err);
             }
-            smol::Timer::after(Duration::from_secs(15)).await;
+            smol::Timer::after(Duration::from_secs(15000)).await;
         }
     })
 }

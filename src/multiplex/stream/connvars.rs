@@ -15,7 +15,11 @@ use crate::{
     utilities::MyFutureExt,
 };
 
-use super::{congestion::Highspeed, inflight::Inflight, MSS};
+use super::{
+    congestion::{Cubic, Highspeed},
+    inflight::Inflight,
+    MSS,
+};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
@@ -56,8 +60,8 @@ impl Default for ConnVars {
             // next_pace_time: Instant::now(),
             lost_seqnos: BTreeSet::new(),
             last_loss: None,
-            // cc: Box::new(Cubic::new(0.7, 0.4)),
-            cc: Box::new(Highspeed::new(1)),
+            cc: Box::new(Cubic::new(0.7, 0.4)),
+            // cc: Box::new(Highspeed::new(1)),
             pacer: Pacer::new(Duration::from_millis(1)),
             // cc: Box::new(Trivial::new(300)),
         }
@@ -296,10 +300,10 @@ impl ConnVars {
         // We don't want retransmissions to cause more than CWND packets in flight, any more do we let normal transmissions do so.
         // Thus, we must have a state where a packet is known to be lost, but is not yet retransmitted.
         let first_retrans = self.lost_seqnos.iter().next().cloned();
-        let can_retransmit = self.inflight.inflight() <= self.cc.cwnd();
+        // let can_retransmit = self.inflight.inflight() <= self.cc.cwnd();
         // If we've already closed the connection, we cannot write *new* packets
-        let can_write_new = can_retransmit
-            && self.inflight.last_minus_first() <= self.cc.cwnd()
+        let can_write_new = self.inflight.inflight() <= self.cc.cwnd()
+            && self.inflight.last_minus_first() <= self.cc.cwnd() * 2
             && !self.closing
             && self.lost_seqnos.is_empty();
         let force_ack = self.ack_seqnos.len() >= ACK_BATCH;
@@ -374,7 +378,7 @@ impl ConnVars {
         }
         .pending_unless(first_rto.is_some());
         let retransmit = async { anyhow::Ok(ConnVarEvt::Retransmit(first_retrans.unwrap())) }
-            .pending_unless(first_retrans.is_some() && can_retransmit);
+            .pending_unless(first_retrans.is_some());
 
         write_urel
             .or(rto_timeout
@@ -388,8 +392,6 @@ impl ConnVars {
 
     fn pacing_rate(&self) -> f64 {
         // calculate implicit rate
-        (self.cc.cwnd() as f64 / self.inflight.min_rtt().as_secs_f64()).max(10.0)
-
-        // self.inflight.delivery_rate().max(1.0)
+        (self.cc.cwnd() as f64 / self.inflight.min_rtt().as_secs_f64()).max(1.0)
     }
 }
