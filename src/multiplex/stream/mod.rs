@@ -5,6 +5,7 @@ use bipe::{BipeReader, BipeWriter};
 use bytes::Bytes;
 use connvars::ConnVars;
 
+use futures_util::{stream::IntoAsyncRead, TryStream, TryStreamExt};
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
 use smol_str::SmolStr;
@@ -16,12 +17,23 @@ mod inflight;
 pub const MSS: usize = 16384; // pretty large MSS; rely on underlying transport to fragment
 const MAX_WAIT_SECS: u64 = 60;
 
+type ByteReceiverInner = Pin<
+    Box<
+        dyn TryStream<Item = std::io::Result<Bytes>, Error = std::io::Error, Ok = Bytes>
+            + Send
+            + Sync
+            + 'static,
+    >,
+>;
+
+type ByteReceiver = DArc<DMutex<IntoAsyncRead<ByteReceiverInner>>>;
+
 #[derive(Clone)]
 /// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
 pub struct MuxStream {
     send_write: DArc<DMutex<BipeWriter>>,
     send_write_urel: Sender<Bytes>,
-    recv_read: DArc<DMutex<BipeReader>>,
+    recv_read: ByteReceiver,
     recv_read_urel: Receiver<Bytes>,
     additional_info: SmolStr,
 }
@@ -36,7 +48,7 @@ impl MuxStream {
         let (send_write_urel, recv_write_urel) = smol::channel::bounded(100);
         let (send_read_urel, recv_read_urel) = smol::channel::bounded(100);
         let (send_write, recv_write) = bipe::bipe(MSS * 2);
-        let (send_read, recv_read) = bipe::bipe(MSS * 2);
+        let (send_read, recv_read) = smol::channel::bounded(100);
         let (send_wire_read, recv_wire_read) = smol::channel::bounded(100);
         let aic = additional_info.clone();
         let _task = smolscale::spawn(async move {
@@ -56,10 +68,11 @@ impl MuxStream {
                 tracing::debug!("stream_actor died: {}", e)
             }
         });
+        let inner: ByteReceiverInner = Box::pin(recv_read.map(|s| Ok::<_, std::io::Error>(s)));
         (
             MuxStream {
                 send_write: DArc::new(DMutex::new(send_write)),
-                recv_read: DArc::new(DMutex::new(recv_read)),
+                recv_read: DArc::new(DMutex::new(inner.into_async_read())),
                 send_write_urel,
                 recv_read_urel,
                 additional_info,
@@ -159,7 +172,7 @@ async fn stream_actor(
     mut state: StreamState,
     mut recv_write: BipeReader,
     recv_write_urel: Receiver<Bytes>,
-    mut send_read: BipeWriter,
+    mut send_read: Sender<Bytes>,
     send_read_urel: Sender<Bytes>,
     recv_wire_read: Receiver<Message>,
     send_wire_write: Sender<Message>,
@@ -265,7 +278,7 @@ async fn stream_actor(
                 stream_id,
                 mut death,
             } => {
-                drop(send_read.close().await);
+                send_read.close();
                 tracing::trace!("C={} RESET", stream_id);
                 send_wire_write
                     .send(Message::Rel {

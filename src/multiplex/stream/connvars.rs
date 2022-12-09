@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bipe::{BipeReader, BipeWriter};
+use bipe::BipeReader;
 use bytes::Bytes;
 use rustc_hash::FxHashSet;
 use smol::channel::{Receiver, Sender};
@@ -85,7 +85,7 @@ impl ConnVars {
         stream_id: u16,
         recv_write: &mut BipeReader,
         recv_write_urel: &Receiver<Bytes>,
-        send_read: &mut BipeWriter,
+        send_read: &Sender<Bytes>,
         send_read_urel: &Sender<Bytes>,
         recv_wire_read: &Receiver<Message>,
         transmit: &Sender<Message>,
@@ -198,7 +198,7 @@ impl ConnVars {
                 self.lowest_unseen += times.len() as u64;
                 let mut success = true;
                 for pkt in times {
-                    success |= send_read.write_all(&pkt).await.is_ok();
+                    success |= send_read.send(pkt).await.is_ok();
                 }
                 assert_eq!(self.inflight.lost_count(), self.lost_seqnos.len());
                 if success {
