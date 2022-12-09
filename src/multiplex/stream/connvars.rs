@@ -299,10 +299,9 @@ impl ConnVars {
         let can_retransmit = self.inflight.inflight() <= self.cc.cwnd();
         // If we've already closed the connection, we cannot write *new* packets
         let can_write_new = can_retransmit
-            && self.inflight.unacked() <= self.cc.cwnd()
+            && self.inflight.last_minus_first() <= self.cc.cwnd()
             && !self.closing
-            && self.lost_seqnos.is_empty()
-            && self.inflight.last_minus_first() <= 10000;
+            && self.lost_seqnos.is_empty();
         let force_ack = self.ack_seqnos.len() >= ACK_BATCH;
         assert!(self.ack_seqnos.len() <= ACK_BATCH);
 
