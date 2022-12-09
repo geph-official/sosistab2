@@ -62,8 +62,6 @@ pub async fn multiplex(
         Dead(u16),
     }
 
-    let _send_dominance = 0.0;
-
     loop {
         // fires on receiving messages
         let recv_msg = async {
@@ -350,11 +348,11 @@ impl ConnTable {
     }
 
     fn find_id(&self) -> Option<u16> {
-        if self.sid_to_stream.len() >= 65535 {
-            log::warn!("ran out of descriptors ({})", self.sid_to_stream.len());
-            return None;
-        }
         loop {
+            if self.sid_to_stream.len() >= 50000 {
+                log::warn!("ran out of descriptors ({})", self.sid_to_stream.len());
+                return None;
+            }
             let possible_id: u16 = rand::thread_rng().gen();
             if self.sid_to_stream.get(&possible_id).is_none() {
                 log::debug!(
