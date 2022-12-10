@@ -11,12 +11,6 @@ pub(crate) fn new_udp_socket_bind(addr: SocketAddr) -> std::io::Result<UdpSocket
     Ok(socket.into_udp_socket().try_into().unwrap())
 }
 
-// /// Create a new UDP socket that has a largeish buffer and isn't bound to anything.
-// pub(crate) fn new_udp_socket_bind(addr: SocketAddr) -> std::io::Result<fastudp::FastUdpSocket> {
-//     let socket = get_socket(addr)?;
-//     Ok(socket.into_udp_socket().try_into().unwrap())
-// }
-
 fn get_socket(addr: SocketAddr) -> std::io::Result<Socket> {
     let socket = Socket::new(
         match addr {

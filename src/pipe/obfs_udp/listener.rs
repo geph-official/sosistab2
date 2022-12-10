@@ -79,9 +79,6 @@ async fn listener_loop(
         b
     };
 
-    // log::warn!("WAITING 10 seconds before starting listener loop...");
-    // fastsleep(Duration::from_secs(10)).await;
-
     loop {
         let mut buf = [0u8; 2048];
         let (n, client_addr) = socket.recv_from(&mut buf).await?;

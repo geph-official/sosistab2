@@ -60,8 +60,8 @@ impl Default for ConnVars {
             // next_pace_time: Instant::now(),
             lost_seqnos: BTreeSet::new(),
             last_loss: None,
-            cc: Box::new(Cubic::new(0.7, 0.4)),
-            // cc: Box::new(Highspeed::new(1)),
+            // cc: Box::new(Cubic::new(0.7, 0.4)),
+            cc: Box::new(Highspeed::new(1)),
             pacer: Pacer::new(Duration::from_millis(1)),
             // cc: Box::new(Trivial::new(300)),
         }
@@ -303,7 +303,7 @@ impl ConnVars {
         // let can_retransmit = self.inflight.inflight() <= self.cc.cwnd();
         // If we've already closed the connection, we cannot write *new* packets
         let can_write_new = self.inflight.inflight() <= self.cc.cwnd()
-            && self.inflight.last_minus_first() <= self.cc.cwnd() * 2
+            && self.inflight.last_minus_first() <= self.cc.cwnd() * 10
             && !self.closing
             && self.lost_seqnos.is_empty();
         let force_ack = self.ack_seqnos.len() >= ACK_BATCH;
