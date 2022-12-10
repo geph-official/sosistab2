@@ -51,9 +51,9 @@ impl StatsCalculator {
         let loss_qualified = self.lost_qualified.max(1) as f64
             / (self.acked_qualified + self.lost_qualified).max(1) as f64;
         let dead = if let (Some(first), Some(last)) = (self.first_outstanding, self.last_ack) {
-            first.elapsed() > Duration::from_secs(3)
-                && last.elapsed() > Duration::from_secs(3)
-                && self.outstanding > 3
+            first.elapsed() > Duration::from_secs(1)
+                && last.elapsed() > Duration::from_secs(1)
+                && self.outstanding > 2
         } else {
             false
         };

@@ -15,11 +15,7 @@ use crate::{
     utilities::MyFutureExt,
 };
 
-use super::{
-    congestion::{Cubic, Highspeed},
-    inflight::Inflight,
-    MSS,
-};
+use super::{congestion::Highspeed, inflight::Inflight, MSS};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
