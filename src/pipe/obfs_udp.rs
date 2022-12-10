@@ -136,8 +136,14 @@ impl ObfsUdpPipe {
         server_pk: ObfsUdpPublic,
         metadata: &str,
     ) -> anyhow::Result<ObfsUdpPipe> {
-        let socket =
-            new_udp_socket_bind("[::]:0".parse().unwrap()).context("could not bind udp socket")?;
+        let addr = if server_addr.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        }
+        .parse::<SocketAddr>()
+        .unwrap();
+        let socket = new_udp_socket_bind(addr).context("could not bind udp socket")?;
 
         // do the handshake
         // generate pk-sk pairs for encryption after the session is established

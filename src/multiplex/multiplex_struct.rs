@@ -37,7 +37,7 @@ impl Multiplex {
                 their_long_sk.map(|s| s.0),
             )
             .unwrap_or_else(|e| {
-                panic!("oh no the multiplex actor RETURNED?! {:?}", e);
+                log::debug!("oh no the multiplex actor RETURNED?! {:?}", e);
             }),
         );
         Multiplex {

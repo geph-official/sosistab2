@@ -255,7 +255,7 @@ async fn stream_actor(
                         stream_id,
                         &mut recv_write,
                         &recv_write_urel,
-                        &mut send_read,
+                        &send_read,
                         &send_read_urel,
                         &recv_wire_read,
                         &send_wire_write,
