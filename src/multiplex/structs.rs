@@ -131,6 +131,14 @@ impl PipePool {
         }
     }
 
+    /// Clears all the dead pipes. Returns the number of pipes cleared.
+    pub fn clear_dead(&self) -> usize {
+        let mut pipes = self.pipes.write();
+        let start_len = pipes.len();
+        pipes.retain(|f| !f.0.get_stats().dead);
+        start_len - pipes.len()
+    }
+
     /// Adds a Pipe to the PipePool, deleting the oldest pipe if there are too many Pipes in the PipePool.
     pub fn add_pipe(&self, pipe: impl Pipe) {
         let mut v = self.pipes.write();

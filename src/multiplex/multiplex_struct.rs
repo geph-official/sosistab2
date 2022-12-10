@@ -59,6 +59,11 @@ impl Multiplex {
         self.pipe_pool.add_pipe(pipe)
     }
 
+    /// Removes all dead pipes from the multiplex, returning how many pipes were dead.
+    pub fn clear_dead_pipes(&self) -> usize {
+        self.pipe_pool.clear_dead()
+    }
+
     /// Open a reliable conn to the other end.
     pub async fn open_conn(&self, additional: &str) -> std::io::Result<MuxStream> {
         let (send, recv) = smol::channel::unbounded();
