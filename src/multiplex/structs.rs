@@ -144,7 +144,7 @@ impl PipePool {
         let pipes = self.pipes.read();
         pipes
             .iter()
-            .min_by_key(|s| s.0.get_stats())
+            .min_by_key(|s| s.0.get_stats().score())
             .map(|s| s.0.clone())
     }
 
