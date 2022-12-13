@@ -139,6 +139,15 @@ impl PipePool {
         start_len - pipes.len()
     }
 
+    /// Obtains the best pipe.
+    pub fn best_pipe(&self) -> Option<impl Pipe> {
+        let pipes = self.pipes.read();
+        pipes
+            .iter()
+            .min_by_key(|s| s.0.get_stats())
+            .map(|s| s.0.clone())
+    }
+
     /// Adds a Pipe to the PipePool, deleting the oldest pipe if there are too many Pipes in the PipePool.
     pub fn add_pipe(&self, pipe: impl Pipe) {
         let mut v = self.pipes.write();

@@ -59,6 +59,11 @@ impl Multiplex {
         self.pipe_pool.add_pipe(pipe)
     }
 
+    /// Obtains the best pipe in this multiplex right now.
+    pub fn best_pipe(&self) -> Option<impl Pipe> {
+        self.pipe_pool.best_pipe()
+    }
+
     /// Removes all dead pipes from the multiplex, returning how many pipes were dead.
     pub fn clear_dead_pipes(&self) -> usize {
         self.pipe_pool.clear_dead()
