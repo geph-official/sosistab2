@@ -1,6 +1,6 @@
 [package]
 name = "sosistab2"
-version = "0.3.10"
+version = "0.3.11"
 authors = ["nullchinchilla <nullchinchilla@pm.me>", "Geph Project <contact@geph.io"]
 edition = "2021"
 description="An obfuscated datagram transport for horrible networks"
