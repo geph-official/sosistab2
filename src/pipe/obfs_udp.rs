@@ -242,7 +242,7 @@ async fn client_loop(
         let res: anyhow::Result<()> = async {
             let up_loop = async {
                 loop {
-                    let msg = recv_upcoded.recv().await?;
+                    let msg = recv_upcoded.recv().await.context("death")?;
                     // log::debug!("serverbound: {:?}", msg);
                     let msg = stdcode::serialize(&msg)?;
                     let enc_msg = enc.encrypt(&msg);
@@ -261,15 +261,17 @@ async fn client_loop(
                         let dec_msg = dec.decrypt(dn_msg)?;
 
                         let deser_msg = stdcode::deserialize(&dec_msg)?;
-                        send_downcoded.send(deser_msg).await?;
+                        send_downcoded.send(deser_msg).await.context("death")?;
                     }
                 })
                 .await
         }
         .await;
         if let Err(err) = res {
-            log::debug!("client loop exiting: {:?}", err);
-            return;
+            log::warn!("client loop error: {:?}", err);
+            if err.to_string().contains("death") {
+                return;
+            }
         }
     }
 }
