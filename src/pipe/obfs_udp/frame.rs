@@ -39,6 +39,8 @@ pub enum PipeFrame {
         /// negative acknowledgements
         naks: Vec<u64>,
     },
+    Ping(u64),
+    Pong(u64),
 }
 
 impl PipeFrame {

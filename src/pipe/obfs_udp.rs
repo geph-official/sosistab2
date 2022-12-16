@@ -8,6 +8,7 @@ mod stats;
 
 use crate::{
     crypt::{triple_ecdh, ObfsAead, SymmetricFromAsymmetric, CLIENT_DN_KEY, CLIENT_UP_KEY},
+    timer::fastsleep_until,
     utilities::{
         sockets::{new_udp_socket_bind, MyUdpSocket},
         BatchTimer, ReplayFilter,
@@ -19,7 +20,7 @@ use bytes::Bytes;
 pub use listener::ObfsUdpListener;
 use parking_lot::Mutex;
 use priority_queue::PriorityQueue;
-use rand::rngs::OsRng;
+use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use smol::{
     channel::{Receiver, Sender},
@@ -193,8 +194,8 @@ impl ObfsUdpPipe {
             socket.send_to(&client_resp, server_addr).await?;
 
             // create a pipe
-            let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
-            let (send_downcoded, recv_downcoded) = smol::channel::unbounded();
+            let (send_upcoded, recv_upcoded) = smol::channel::bounded(1000);
+            let (send_downcoded, recv_downcoded) = smol::channel::bounded(1000);
             let pipe = ObfsUdpPipe::with_custom_transport(
                 recv_downcoded,
                 send_upcoded,
@@ -320,21 +321,33 @@ async fn pipe_loop(
     let mut defrag = Defragmenter::default();
     let mut replay_filter = ReplayFilter::default();
     let mut out_frag_buff = Vec::new();
-    let mut ack_timer = BatchTimer::new(Duration::from_millis(500), 100);
+    let mut ack_timer = BatchTimer::new(Duration::from_millis(200), 100);
     let mut probably_lost_incoming = PriorityQueue::new();
     let mut unacked_incoming = Vec::new();
     let mut last_incoming_seqno = 0;
 
+    let mut outstanding_ping: Option<(u64, Instant, usize)> = None;
     loop {
         let loss = stats_calculator.lock().get_stats().loss;
         let event = Event::fec_timeout(&mut fec_encoder, loss)
             .or(Event::ack_timeout(&mut ack_timer))
             .or(Event::new_in_packet(&recv_downcoded))
             .or(Event::new_out_payload(&recv_upraw))
+            .or(Event::send_ping(outstanding_ping.map(|s| s.1)))
             .await;
 
         if let Ok(event) = event {
             match event {
+                Event::SendPing => {
+                    let (id, time, count) = outstanding_ping.as_mut().unwrap();
+                    *time += Duration::from_secs_f64(0.2 * 1.1f64.powi(*count as i32));
+                    *count += 1;
+                    log::debug!("sending ping {id}x{count}");
+                    let _ = send_upcoded.try_send(PipeFrame::Ping(*id));
+                    if *count > 5 {
+                        stats_calculator.lock().set_dead(true);
+                    }
+                }
                 Event::NewOutPayload(bts) => {
                     out_frag_buff.clear();
                     fragment(bts, &mut out_frag_buff);
@@ -347,10 +360,24 @@ async fn pipe_loop(
                         stats_calculator.lock().add_sent(seqno);
 
                         let msg = PipeFrame::Data { seqno, body: bts };
-                        let _ = send_upcoded.send(msg).await;
+                        let _ = send_upcoded.try_send(msg);
+                    }
+                    if outstanding_ping.is_none() {
+                        outstanding_ping = Some((
+                            rand::thread_rng().gen(),
+                            Instant::now() + Duration::from_millis(500),
+                            0,
+                        ));
                     }
                 }
                 Event::NewInPacket(pipe_frame) => match pipe_frame {
+                    PipeFrame::Ping(id) => {
+                        let _ = send_upcoded.try_send(PipeFrame::Pong(id));
+                    }
+                    PipeFrame::Pong(pong) => {
+                        stats_calculator.lock().set_dead(false);
+                        outstanding_ping = None;
+                    }
                     PipeFrame::Data { seqno, body } => {
                         if replay_filter.add(seqno) {
                             fec_decoder.insert_data(seqno, body.clone());
@@ -442,7 +469,7 @@ async fn pipe_loop(
                 Event::FecTimeout(parity_frames) => {
                     log::trace!("FecTimeout; sending {} parities", parity_frames.len());
                     for parity_frame in parity_frames {
-                        let _ = send_upcoded.send(parity_frame).await;
+                        let _ = send_upcoded.try_send(parity_frame);
                     }
                 }
             }
@@ -459,6 +486,7 @@ enum Event {
     NewInPacket(PipeFrame), // either data or parity or ack request packet or acks
     FecTimeout(Vec<PipeFrame>),
     AckTimeout,
+    SendPing,
 }
 
 impl Event {
@@ -480,5 +508,14 @@ impl Event {
     pub async fn ack_timeout(ack_timer: &mut BatchTimer) -> anyhow::Result<Self> {
         ack_timer.wait().await;
         Ok(Event::AckTimeout)
+    }
+
+    pub async fn send_ping(next_ping_time: Option<Instant>) -> anyhow::Result<Self> {
+        if let Some(next_ping_time) = next_ping_time {
+            fastsleep_until(next_ping_time).await;
+            Ok(Event::SendPing)
+        } else {
+            smol::future::pending().await
+        }
     }
 }

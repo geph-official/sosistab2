@@ -34,9 +34,7 @@ pub(crate) struct StatsCalculator {
     variance_sum: f64,
     last_latency: Duration,
 
-    outstanding: u64,
-    first_outstanding: Option<Instant>,
-    last_ack: Option<Instant>,
+    dead: bool,
 }
 
 impl StatsCalculator {
@@ -50,15 +48,9 @@ impl StatsCalculator {
         let loss_total = self.lost.max(1) as f64 / (self.acked + self.lost).max(1) as f64;
         let loss_qualified = self.lost_qualified.max(1) as f64
             / (self.acked_qualified + self.lost_qualified).max(1) as f64;
-        let dead = if let (Some(first), Some(last)) = (self.first_outstanding, self.last_ack) {
-            first.elapsed() > Duration::from_secs(1)
-                && last.elapsed() > Duration::from_secs(1)
-                && self.outstanding > 2
-        } else {
-            false
-        };
+
         PipeStats {
-            dead,
+            dead: self.dead,
             loss: loss_total.min(loss_qualified).min(0.3),
             latency: self.latency_sum / (self.acked.max(1) as u32),
             jitter: Duration::from_secs_f64(
@@ -69,8 +61,6 @@ impl StatsCalculator {
 
     /// Adds an acknowledgement, along with a `time_offset` that represents the local delay before the acknowledgement was sent by the remote end.
     pub fn add_ack(&mut self, seqno: u64, time_offset: Duration) {
-        self.outstanding = 0;
-        self.last_ack = Some(Instant::now());
         let clears_neighborhood = self.clears_neighborhood(seqno);
         if let Some(existing) = self.packets.get_mut(&seqno) {
             // record the acks
@@ -122,10 +112,6 @@ impl StatsCalculator {
 
     /// Adds a sent packet to the StatsCalculator
     pub fn add_sent(&mut self, seqno: u64) {
-        if self.outstanding == 0 {
-            self.first_outstanding = Some(Instant::now())
-        }
-        self.outstanding += 1;
         self.packets.insert(
             seqno,
             PacketRecord {
@@ -134,6 +120,11 @@ impl StatsCalculator {
             },
         );
         self.cleanup();
+    }
+
+    /// Sets the death flag
+    pub fn set_dead(&mut self, dead: bool) {
+        self.dead = dead;
     }
 
     /// "Garbage collects"

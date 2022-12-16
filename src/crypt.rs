@@ -115,7 +115,8 @@ impl ObfsAead {
 
         // make an output. it starts out containing the padding.
         // we "round up" to ensure that long term averages cannot leak things either. regardless, this is very much "best effort"
-        let padding_len = (16 - msg.len() % 16) + rand::random::<usize>() % 16;
+        let additional_padding = 128 - (msg.len().min(128));
+        let padding_len = additional_padding + (16 - msg.len() % 16) + rand::random::<usize>() % 16;
         let mut padded_msg = Vec::with_capacity(1 + padding_len + msg.len() + 12);
         padded_msg.push(padding_len as u8);
         padded_msg.resize(padding_len + 1, 0xff);
