@@ -183,7 +183,7 @@ impl Pipe for ObfsTlsPipe {
             jitter.as_secs_f64() * 1000.0
         );
         PipeStats {
-            dead: self.pings_outstanding.load(Ordering::SeqCst) > 3,
+            dead: self.pings_outstanding.load(Ordering::SeqCst) > 3 || self._task.is_finished(),
             loss: 0.0,
             latency,
             jitter,
