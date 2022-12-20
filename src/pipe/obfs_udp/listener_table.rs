@@ -1,6 +1,5 @@
 use anyhow::Context;
-
-use moka::sync::Cache;
+use dashmap::DashMap;
 use smol::channel::{Receiver, Sender};
 use std::{net::SocketAddr, sync::Arc};
 
@@ -12,7 +11,7 @@ use crate::{
 use super::frame::PipeFrame;
 
 pub struct PipeTable {
-    table: Cache<SocketAddr, PipeBack>,
+    table: DashMap<SocketAddr, PipeBack>,
     socket: MyUdpSocket,
 }
 
@@ -25,9 +24,9 @@ struct PipeBack {
 
 impl PipeTable {
     /// Constructor.
-    pub fn new(max_capacity: u64, socket: MyUdpSocket) -> Self {
+    pub fn new(socket: MyUdpSocket) -> Self {
         Self {
-            table: Cache::new(max_capacity),
+            table: DashMap::new(),
             socket,
         }
     }
@@ -110,7 +109,7 @@ impl PipeTable {
 }
 
 async fn dn_forward_loop(
-    table: Cache<SocketAddr, PipeBack>,
+    table: DashMap<SocketAddr, PipeBack>,
     socket: MyUdpSocket,
     client_addr: SocketAddr,
     encoder: ObfsAead,
@@ -125,6 +124,6 @@ async fn dn_forward_loop(
     }
     .await;
     if r.is_err() {
-        table.invalidate(&client_addr)
+        table.remove(&client_addr);
     }
 }

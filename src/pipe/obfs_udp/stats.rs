@@ -52,7 +52,7 @@ impl StatsCalculator {
         PipeStats {
             dead: self.dead,
             loss: loss_total.min(loss_qualified).min(0.3),
-            latency: self.latency_sum / (self.acked.max(1) as u32),
+            latency: self.latency_sum.max(Duration::from_secs(1)) / (self.acked.max(1) as u32),
             jitter: Duration::from_secs_f64(
                 (self.variance_sum / (self.acked).max(1) as f64).sqrt(),
             ),

@@ -72,7 +72,7 @@ async fn listener_loop(
     let init_enc = ObfsAead::new(&cookie.generate_s2c());
 
     // make table and token key
-    let mut table = PipeTable::new(1_000_000, socket.clone());
+    let mut table = PipeTable::new(socket.clone());
     let token_key = {
         let mut b = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut b);

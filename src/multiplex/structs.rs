@@ -166,12 +166,15 @@ impl PipePool {
 
     pub async fn send(&self, pkt: Bytes) {
         let bb = self.last_pipe.lock().as_ref().map(|(k, v)| (k.clone(), *v));
-        if let Some((last, time)) = bb {
-            if time.elapsed() < Duration::from_millis(400) {
+        let last_used = if let Some((last, time)) = bb {
+            if time.elapsed() < Duration::from_millis(2000) {
                 last.send(pkt).await;
                 return;
             }
-        }
+            Some(last)
+        } else {
+            None
+        };
 
         let best_pipe = {
             let v = self.pipes.read();
@@ -185,7 +188,15 @@ impl PipePool {
             v.iter()
                 .map(|(pipe, _)| pipe.clone())
                 .enumerate()
-                .min_by_key(|(_i, pipe)| pipe.get_stats().score())
+                .min_by_key(|(_i, pipe)| {
+                    let this_score = pipe.get_stats().score();
+                    if let Some(last_used) = last_used.as_ref() {
+                        if pipe.peer_addr() == last_used.peer_addr() {
+                            return this_score * 8 / 10;
+                        }
+                    }
+                    this_score
+                })
                 .map(|t| t.1)
         };
         if let Some(best_pipe) = best_pipe {
