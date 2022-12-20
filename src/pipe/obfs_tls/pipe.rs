@@ -168,6 +168,7 @@ impl Pipe for ObfsTlsPipe {
             .iter()
             .copied()
             .fold(Duration::from_secs(0), |d, p| d + p)
+            .max(Duration::from_secs(1))
             / (pings.len() as u32).max(1);
         let jitter = Duration::from_secs_f64(
             (pings
