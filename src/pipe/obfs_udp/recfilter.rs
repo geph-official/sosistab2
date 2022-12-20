@@ -23,7 +23,7 @@ impl RecentFilter {
     pub fn recently_seen(&mut self, val: &[u8]) -> bool {
         // clean up first
         while let Some(to_delete) = self.expiry.front().and_then(|(expiry, hash)| {
-            if expiry.elapsed() > Duration::from_secs(120) {
+            if expiry.elapsed() > Duration::from_secs(600) {
                 Some(*hash)
             } else {
                 None

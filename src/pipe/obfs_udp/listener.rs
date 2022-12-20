@@ -107,7 +107,7 @@ async fn listener_loop(
                                     .unwrap()
                                     .as_secs();
                                 log::debug!("my time {current_timestamp}, their time {timestamp}");
-                                if current_timestamp.abs_diff(timestamp) > 10 {
+                                if current_timestamp.abs_diff(timestamp) > 600 {
                                     log::warn!("time too skewed, so skipping");
                                     continue;
                                 }
