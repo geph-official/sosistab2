@@ -25,7 +25,7 @@ fn to_ioerror<T: Into<Box<dyn std::error::Error + Send + Sync>>>(val: T) -> std:
 impl Multiplex {
     /// Creates a new multiplexed Pipe. If `their_long_sk` is given, verify that the other side has the given secret key.
     pub fn new(my_long_sk: MuxSecret, their_long_sk: Option<MuxPublic>) -> Self {
-        let pipe_pool = Arc::new(PipePool::new(10)); // placeholder value
+        let pipe_pool = Arc::new(PipePool::new(50)); // placeholder value
         let (conn_open, conn_open_recv) = smol::channel::unbounded();
         let (conn_accept_send, conn_accept) = smol::channel::unbounded();
         let _task = smolscale::spawn(

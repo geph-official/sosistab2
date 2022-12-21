@@ -134,7 +134,13 @@ impl PipePool {
     pub fn clear_dead(&self) -> usize {
         let mut pipes = self.pipes.write();
         let start_len = pipes.len();
-        pipes.retain(|f| !f.0.get_stats().dead);
+        pipes.retain(|f| {
+            let stats = f.0.get_stats();
+            if stats.dead {
+                log::warn!("removing dead {}/{}", f.0.peer_addr(), f.0.protocol());
+            }
+            !stats.dead
+        });
         start_len - pipes.len()
     }
 
@@ -164,6 +170,7 @@ impl PipePool {
         if v.len() > self.size_limit {
             v.pop_front();
         }
+        log::warn!("{} pipes in the mux", v.len());
 
         {
             let mut p = self.last_recv_pipe.lock();
@@ -260,7 +267,6 @@ async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<(Bytes,
                 let _ = send_incoming.send((pkt, pipe.clone())).await;
             }
         } else {
-            log::warn!("STOPPING");
             return;
         }
     }
