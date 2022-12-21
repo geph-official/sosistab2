@@ -59,9 +59,14 @@ impl Multiplex {
         self.pipe_pool.add_pipe(pipe)
     }
 
-    /// Obtains the best pipe in this multiplex right now.
-    pub fn best_pipe(&self) -> Option<impl Pipe> {
-        self.pipe_pool.best_pipe()
+    /// Obtains the pipe last used by this multiplex for sending.
+    pub fn last_send_pipe(&self) -> Option<impl Pipe> {
+        self.pipe_pool.last_send_pipe()
+    }
+
+    /// Obtains the pipe last used by this multiplex for receiving.
+    pub fn last_recv_pipe(&self) -> Option<impl Pipe> {
+        self.pipe_pool.last_recv_pipe()
     }
 
     /// Removes all dead pipes from the multiplex, returning how many pipes were dead.

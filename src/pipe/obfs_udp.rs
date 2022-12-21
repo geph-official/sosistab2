@@ -242,7 +242,7 @@ async fn client_loop(
         let res: anyhow::Result<()> = async {
             let up_loop = async {
                 loop {
-                    let msg = recv_upcoded.recv().await.context("death")?;
+                    let msg = recv_upcoded.recv().await.context("death in UDP up loop")?;
                     // log::debug!("serverbound: {:?}", msg);
                     let msg = stdcode::serialize(&msg)?;
                     let enc_msg = enc.encrypt(&msg);
@@ -261,7 +261,10 @@ async fn client_loop(
                         let dec_msg = dec.decrypt(dn_msg)?;
 
                         let deser_msg = stdcode::deserialize(&dec_msg)?;
-                        send_downcoded.send(deser_msg).await.context("death")?;
+                        send_downcoded
+                            .send(deser_msg)
+                            .await
+                            .context("death in UDP down loop")?;
                     }
                 })
                 .await
@@ -342,11 +345,11 @@ async fn pipe_loop(
             match event {
                 Event::SendPing => {
                     let (id, time, count) = outstanding_ping.as_mut().unwrap();
-                    *time += Duration::from_secs_f64(0.2 * 1.1f64.powi(*count as i32));
+                    *time += Duration::from_secs_f64(0.5 * 1.5f64.powi(*count as i32));
                     *count += 1;
                     log::debug!("sending ping {id}x{count}");
                     let _ = send_upcoded.try_send(PipeFrame::Ping(*id));
-                    if *count > 5 {
+                    if *count > 3 {
                         stats_calculator.lock().set_dead(true);
                     }
                 }

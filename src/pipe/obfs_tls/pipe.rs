@@ -178,7 +178,7 @@ impl Pipe for ObfsTlsPipe {
                 / (pings.len().max(1) as f64))
                 .sqrt(),
         );
-        log::debug!(
+        log::trace!(
             "TLS stats: latency = {:.2}ms, jitter = {:.2}ms",
             latency.as_secs_f64() * 1000.0,
             jitter.as_secs_f64() * 1000.0

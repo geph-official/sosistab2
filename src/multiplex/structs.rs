@@ -109,10 +109,10 @@ impl<T: Clone> Reorderer<T> {
 pub struct PipePool {
     pipes: RwLock<VecDeque<(Arc<dyn Pipe>, smol::Task<()>)>>,
     size_limit: usize,
-    send_incoming: Sender<Bytes>,
-    recv_incoming: Receiver<Bytes>,
-    last_pipe: Mutex<Option<(Arc<dyn Pipe>, Instant)>>,
-    _task: smol::Task<()>,
+    send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>,
+    recv_incoming: Receiver<(Bytes, Arc<dyn Pipe>)>,
+    last_send_pipe: Mutex<Option<(Arc<dyn Pipe>, Instant)>>,
+    last_recv_pipe: Mutex<Option<Arc<dyn Pipe>>>,
 }
 
 impl PipePool {
@@ -120,14 +120,13 @@ impl PipePool {
     pub fn new(size_limit: usize) -> Self {
         let (send_incoming, recv_incoming) = smol::channel::bounded(1);
         let pipes = RwLock::new(VecDeque::new());
-        let task = smolscale::spawn(async {});
         Self {
             pipes,
             size_limit,
             send_incoming,
             recv_incoming,
-            last_pipe: Default::default(),
-            _task: task,
+            last_send_pipe: Default::default(),
+            last_recv_pipe: Default::default(),
         }
     }
 
@@ -139,13 +138,16 @@ impl PipePool {
         start_len - pipes.len()
     }
 
-    /// Obtains the best pipe.
-    pub fn best_pipe(&self) -> Option<impl Pipe> {
-        let pipes = self.pipes.read();
-        pipes
-            .iter()
-            .min_by_key(|s| s.0.get_stats().score())
-            .map(|s| s.0.clone())
+    /// Obtains the pipe last used for sending.
+    pub fn last_send_pipe(&self) -> Option<impl Pipe> {
+        let pipe = self.last_send_pipe.lock();
+        pipe.as_ref().map(|p| p.0.clone())
+    }
+
+    /// Obtains the pipe last used for receiving.
+    pub fn last_recv_pipe(&self) -> Option<impl Pipe> {
+        let pipe = self.last_recv_pipe.lock();
+        pipe.clone()
     }
 
     /// Adds a Pipe to the PipePool, deleting the oldest pipe if there are too many Pipes in the PipePool.
@@ -158,14 +160,31 @@ impl PipePool {
             self.send_incoming.clone(),
         ));
 
-        v.push_back((arc_pipe, task));
+        v.push_back((arc_pipe.clone(), task));
         if v.len() > self.size_limit {
             v.pop_front();
+        }
+
+        {
+            let mut p = self.last_recv_pipe.lock();
+            if p.is_none() {
+                *p = Some(arc_pipe.clone());
+            }
+        }
+        {
+            let mut p = self.last_send_pipe.lock();
+            if p.is_none() {
+                *p = Some((arc_pipe.clone(), Instant::now()));
+            }
         }
     }
 
     pub async fn send(&self, pkt: Bytes) {
-        let bb = self.last_pipe.lock().as_ref().map(|(k, v)| (k.clone(), *v));
+        let bb = self
+            .last_send_pipe
+            .lock()
+            .as_ref()
+            .map(|(k, v)| (k.clone(), *v));
         let last_used = if let Some((last, time)) = bb {
             if time.elapsed() < Duration::from_millis(2000) {
                 last.send(pkt).await;
@@ -189,10 +208,20 @@ impl PipePool {
                 .map(|(pipe, _)| pipe.clone())
                 .enumerate()
                 .min_by_key(|(_i, pipe)| {
-                    let this_score = pipe.get_stats().score();
+                    let stats = pipe.get_stats();
+                    log::debug!(
+                        "pipe {} / {} has PING {:.2} +/- {:.2} ms, LOSS {:.2}%, SCORE {}",
+                        pipe.peer_addr(),
+                        pipe.protocol(),
+                        stats.latency.as_secs_f64() * 1000.0,
+                        stats.jitter.as_secs_f64() * 1000.0,
+                        stats.loss * 100.0,
+                        stats.score()
+                    );
+                    let this_score = stats.score();
                     if let Some(last_used) = last_used.as_ref() {
                         if pipe.peer_addr() == last_used.peer_addr() {
-                            return this_score * 8 / 10;
+                            return (this_score as f64 * 0.8) as _;
                         }
                     }
                     this_score
@@ -207,17 +236,18 @@ impl PipePool {
             );
             best_pipe.send(pkt).await;
 
-            *self.last_pipe.lock() = Some((best_pipe.clone(), Instant::now()))
+            *self.last_send_pipe.lock() = Some((best_pipe.clone(), Instant::now()))
         }
     }
 
     pub async fn recv(&self) -> anyhow::Result<Bytes> {
-        let ret = self.recv_incoming.recv().await?;
+        let (ret, pipe) = self.recv_incoming.recv().await?;
+        *self.last_recv_pipe.lock() = Some(pipe);
         Ok(ret)
     }
 }
 
-async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<Bytes>) {
+async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>) {
     loop {
         let pkt = pipe.recv().await;
         if let Ok(pkt) = pkt {
@@ -227,7 +257,7 @@ async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<Bytes>)
 
                 pipe.send(Bytes::from_static(b"!!pong!!")).await;
             } else if pkt[..] != b"!!pong!!"[..] {
-                let _ = send_incoming.send(pkt).await;
+                let _ = send_incoming.send((pkt, pipe.clone())).await;
             }
         } else {
             log::warn!("STOPPING");

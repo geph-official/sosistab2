@@ -99,13 +99,14 @@ pub struct PipeStats {
 
 impl PipeStats {
     pub fn score(&self) -> u64 {
-        log::debug!("current stats: {:?}", self);
         if self.dead {
             u64::MAX
         } else {
-            let threshold: f64 = 0.05;
-            let n = threshold.log(self.loss).max(1.0); // number of transmissions needed so that Prob(pkt is lost) <= threshold
-            ((n * self.latency.as_secs_f64() + self.jitter.as_secs_f64() * 3.0) * 1000.0) as u64
+            // Ignore loss because not all backends even report loss. In any case, congestion should show up in jitter.
+
+            // let threshold: f64 = 0.05;
+            // let n = threshold.log(self.loss).max(1.0); // number of transmissions needed so that Prob(pkt is lost) <= threshold
+            ((self.latency.as_secs_f64() + self.jitter.as_secs_f64() * 3.0) * 1000.0) as u64
         }
     }
 }
