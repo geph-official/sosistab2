@@ -56,6 +56,7 @@ impl StatsCalculator {
             jitter: Duration::from_secs_f64(
                 (self.variance_sum / (self.acked).max(1) as f64).sqrt(),
             ),
+            samples: self.acked_qualified.min(10000) as _,
         }
     }
 

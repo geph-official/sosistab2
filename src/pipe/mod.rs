@@ -95,6 +95,7 @@ pub struct PipeStats {
     pub loss: f64, // 0 to 1
     pub latency: Duration,
     pub jitter: Duration,
+    pub samples: usize,
 }
 
 impl PipeStats {

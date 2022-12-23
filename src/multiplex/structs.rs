@@ -204,18 +204,19 @@ impl PipePool {
 
         let best_pipe = {
             let v = self.pipes.read();
-            for (pipe, _) in v.iter() {
-                let pipe = pipe.clone();
-                smolscale::spawn(async move {
-                    pipe.send(Bytes::from_static(b"!!ping!!")).await;
-                })
-                .detach();
-            }
+
             v.iter()
                 .map(|(pipe, _)| pipe.clone())
                 .enumerate()
                 .min_by_key(|(_i, pipe)| {
                     let stats = pipe.get_stats();
+                    if stats.samples < 10 || fastrand::f32() < 0.01 {
+                        let pipe = pipe.clone();
+                        smolscale::spawn(async move {
+                            pipe.send(Bytes::from_static(b"!!ping!!")).await;
+                        })
+                        .detach();
+                    }
                     log::debug!(
                         "pipe {} / {} has PING {:.2} +/- {:.2} ms, LOSS {:.2}%, SCORE {}",
                         pipe.peer_addr(),

@@ -188,6 +188,7 @@ impl Pipe for ObfsTlsPipe {
             loss: 0.0,
             latency,
             jitter,
+            samples: pings.len(),
         }
     }
 
