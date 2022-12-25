@@ -96,10 +96,11 @@ async fn send_loop(
     recv_write: Receiver<InnerMessage>,
     mut inner: async_dup::Arc<async_dup::Mutex<TlsStream<TcpStream>>>,
 ) -> anyhow::Result<()> {
-    let mut ping_timer = BatchTimer::new(Duration::from_millis(100), 100);
+    let mut ping_timer = BatchTimer::new(Duration::from_millis(1000), 1000);
     loop {
         let send_write = async {
             let new_write = recv_write.recv().await?;
+            log::debug!("tls new write: {:?}", new_write);
             anyhow::Ok(new_write)
         };
         let send_ping = async {
@@ -111,8 +112,13 @@ async fn send_loop(
         let msg = send_write.race(send_ping).await?;
         if matches!(msg, InnerMessage::Ping(_)) {
             ping_timer.reset();
-            pings_outstanding.fetch_add(1, Ordering::SeqCst);
-        } else {
+            let outstanding = pings_outstanding.fetch_add(1, Ordering::SeqCst);
+            log::debug!("** sending TLS ping with outstanding = {outstanding} **");
+            if outstanding > 0 {
+                ping_timer.increment();
+            }
+        } else if !matches!(msg, InnerMessage::Pong(_)) {
+            log::debug!("tickling the ping timer due to a new write");
             ping_timer.increment();
         }
         OuterMessage {
@@ -184,7 +190,7 @@ impl Pipe for ObfsTlsPipe {
             jitter.as_secs_f64() * 1000.0
         );
         PipeStats {
-            dead: self.pings_outstanding.load(Ordering::SeqCst) > 3 || self._task.is_finished(),
+            dead: self.pings_outstanding.load(Ordering::SeqCst) > 10 || self._task.is_finished(),
             loss: 0.0,
             latency,
             jitter,
