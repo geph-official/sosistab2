@@ -1,9 +1,10 @@
 use anyhow::Context;
-use dashmap::DashMap;
+
 use itertools::Itertools;
+use moka::sync::Cache;
 use parking_lot::RwLock;
 use smol::channel::{Receiver, Sender};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
 use crate::{
     crypt::{dnify_shared_secret, upify_shared_secret, ObfsAead},
@@ -15,6 +16,7 @@ use super::frame::PipeFrame;
 pub struct PipeTable {
     table: Arc<RwLock<HashMap<SocketAddr, PipeBack>>>,
     socket: MyUdpSocket,
+    ip_blacklist: Arc<Cache<SocketAddr, ()>>,
 }
 
 #[derive(Clone)]
@@ -23,6 +25,7 @@ struct PipeBack {
     decoder: ObfsAead,
     encoder: ObfsAead,
     recv_upcoded: Receiver<PipeFrame>,
+
     _task: Arc<smol::Task<()>>,
 }
 
@@ -32,6 +35,12 @@ impl PipeTable {
         Self {
             table: Default::default(),
             socket,
+            ip_blacklist: Arc::new(
+                Cache::builder()
+                    .max_capacity(100_000)
+                    .time_to_idle(Duration::from_secs(120))
+                    .build(),
+            ),
         }
     }
     /// Adds a new entry to the table.
@@ -84,8 +93,10 @@ impl PipeTable {
         match try_fwd.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                // roaming like this is highly DoS-vulnerable
-
+                // roaming like this is highly DoS-vulnerable, so we use a blacklist mechanism.
+                if self.ip_blacklist.contains_key(&client_addr) {
+                    anyhow::bail!("bailing on blacklisted IP");
+                }
                 log::warn!(
                     "trying all entries because initial decryption failed: {:?}",
                     err
@@ -112,6 +123,7 @@ impl PipeTable {
                         return Ok(());
                     };
                 }
+                self.ip_blacklist.insert(client_addr, ());
                 anyhow::bail!("failed to match packet against any entries in the table")
             }
         }

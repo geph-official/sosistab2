@@ -82,6 +82,7 @@ derivative = "2.2.0"
 ring = "0.16.20"
 smol_str = "0.1.23"
 itertools = "0.10.5"
+moka = "0.9"
 
 
 [profile.dev]
