@@ -79,7 +79,7 @@ impl ObfsTlsPipe {
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionReset, e))?;
         connection.write_all(&cookie).await?;
-        eprintln!("wrote cookie {:?}", cookie);
+        log::debug!("wrote cookie {:?}", cookie);
         connection
             .write_all(&(peer_metadata.len() as u32).to_be_bytes())
             .await?;
