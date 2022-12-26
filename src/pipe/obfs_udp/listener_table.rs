@@ -1,7 +1,9 @@
 use anyhow::Context;
 use dashmap::DashMap;
+use itertools::Itertools;
+use parking_lot::RwLock;
 use smol::channel::{Receiver, Sender};
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use crate::{
     crypt::{dnify_shared_secret, upify_shared_secret, ObfsAead},
@@ -11,7 +13,7 @@ use crate::{
 use super::frame::PipeFrame;
 
 pub struct PipeTable {
-    table: DashMap<SocketAddr, PipeBack>,
+    table: Arc<RwLock<HashMap<SocketAddr, PipeBack>>>,
     socket: MyUdpSocket,
 }
 
@@ -19,6 +21,8 @@ pub struct PipeTable {
 struct PipeBack {
     send_downcoded: Sender<PipeFrame>,
     decoder: ObfsAead,
+    encoder: ObfsAead,
+    recv_upcoded: Receiver<PipeFrame>,
     _task: Arc<smol::Task<()>>,
 }
 
@@ -26,7 +30,7 @@ impl PipeTable {
     /// Constructor.
     pub fn new(socket: MyUdpSocket) -> Self {
         Self {
-            table: DashMap::new(),
+            table: Default::default(),
             socket,
         }
     }
@@ -48,16 +52,18 @@ impl PipeTable {
             self.table.clone(),
             self.socket.clone(),
             client_addr,
-            encoder,
-            recv_upcoded,
+            encoder.clone(),
+            recv_upcoded.clone(),
         ));
 
         let pipe_back = PipeBack {
             send_downcoded,
             decoder,
+            encoder,
+            recv_upcoded,
             _task: Arc::new(task),
         };
-        self.table.insert(client_addr, pipe_back);
+        self.table.write().insert(client_addr, pipe_back);
     }
 
     /// Attempts to decode and forward the packet to an existing pipe. If this fails, tries to decrypt this packet with all keys from table to see if the packet is from an existing session whose client ip has changed. If this also fails, returns None.
@@ -65,8 +71,10 @@ impl PipeTable {
         let try_fwd = async {
             let back = self
                 .table
+                .read()
                 .get(&client_addr)
-                .context("no entry in the table with this client_addr")?;
+                .context("no entry in the table with this client_addr")?
+                .clone();
             let ptext = back.decoder.decrypt(pkt)?;
             let msg = stdcode::deserialize(&ptext)?;
 
@@ -76,40 +84,42 @@ impl PipeTable {
         match try_fwd.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                anyhow::bail!("error: {}", err); // roaming like this is highly DoS-vulnerable
+                // roaming like this is highly DoS-vulnerable
 
-                // log::warn!(
-                //     "trying all entries because initial decryption failed: {:?}",
-                //     err
-                // );
-                // // try all entries in table
-                // for (key, mut back) in self.table.iter() {
-                //     if let Ok(ptext) = back.decoder.decrypt(pkt) {
-                //         let msg = stdcode::deserialize(&ptext)?;
-                //         back.send_downcoded.send(msg).await?;
+                log::warn!(
+                    "trying all entries because initial decryption failed: {:?}",
+                    err
+                );
+                let mut table = self.table.write();
+                let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
+                // try all entries in table
+                for (key, mut back) in table_entries {
+                    if let Ok(ptext) = back.decoder.decrypt(pkt) {
+                        let msg = stdcode::deserialize(&ptext)?;
+                        let _ = back.send_downcoded.try_send(msg);
 
-                //         // update entry in table
-                //         self.table.invalidate(&key);
-                //         let task = smol::spawn(dn_forward_loop(
-                //             self.table.clone(),
-                //             self.socket.clone(),
-                //             client_addr,
-                //             back.encoder.clone(),
-                //             back.recv_upcoded.clone(),
-                //         ));
-                //         back._task = Arc::new(task);
-                //         self.table.insert(client_addr, back);
-                //         return Ok(());
-                //     };
-                // }
-                // anyhow::bail!("failed to match packet against any entries in the table")
+                        // update entry in table
+                        table.remove(&key);
+                        let task = smolscale::spawn(dn_forward_loop(
+                            self.table.clone(),
+                            self.socket.clone(),
+                            client_addr,
+                            back.encoder.clone(),
+                            back.recv_upcoded.clone(),
+                        ));
+                        back._task = Arc::new(task);
+                        table.insert(client_addr, back);
+                        return Ok(());
+                    };
+                }
+                anyhow::bail!("failed to match packet against any entries in the table")
             }
         }
     }
 }
 
 async fn dn_forward_loop(
-    table: DashMap<SocketAddr, PipeBack>,
+    table: Arc<RwLock<HashMap<SocketAddr, PipeBack>>>,
     socket: MyUdpSocket,
     client_addr: SocketAddr,
     encoder: ObfsAead,
@@ -124,6 +134,6 @@ async fn dn_forward_loop(
     }
     .await;
     if r.is_err() {
-        table.remove(&client_addr);
+        table.write().remove(&client_addr);
     }
 }

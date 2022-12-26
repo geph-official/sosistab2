@@ -70,7 +70,7 @@ impl Multiplex {
     }
 
     /// Removes all dead pipes from the multiplex, returning how many pipes were dead.
-    pub fn clear_dead_pipes(&self) -> usize {
+    pub fn clear_dead_pipes(&self) -> Vec<Arc<dyn Pipe>> {
         self.pipe_pool.clear_dead()
     }
 
