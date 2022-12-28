@@ -195,7 +195,7 @@ impl PipePool {
             .as_ref()
             .map(|(k, v)| (k.clone(), *v));
         let last_used = if let Some((last, time)) = bb {
-            if time.elapsed() < Duration::from_millis(2000) {
+            if time.elapsed() < Duration::from_millis(1000) {
                 last.send(pkt).await;
                 return;
             }
@@ -212,7 +212,7 @@ impl PipePool {
                 .enumerate()
                 .min_by_key(|(_i, pipe)| {
                     let stats = pipe.get_stats();
-                    if stats.samples < 10 || fastrand::f32() < 0.01 {
+                    if stats.samples < 10 || fastrand::usize(0..v.len()) == 0 {
                         let pipe = pipe.clone();
                         smolscale::spawn(async move {
                             pipe.send(Bytes::from_static(b"!!ping!!")).await;
