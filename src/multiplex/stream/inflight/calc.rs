@@ -26,7 +26,7 @@ impl RttCalculator {
             || now
                 .saturating_duration_since(self.rtt_update_time)
                 .as_millis()
-                > 3000
+                > 30000
         {
             self.min_rtt = sample;
             self.rtt_update_time = now;

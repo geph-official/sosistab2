@@ -15,11 +15,7 @@ use crate::{
     utilities::MyFutureExt,
 };
 
-use super::{
-    congestion::{Cubic, Highspeed},
-    inflight::Inflight,
-    MSS,
-};
+use super::{congestion::Highspeed, inflight::Inflight, MSS};
 use smol::prelude::*;
 
 pub(crate) struct ConnVars {
@@ -60,8 +56,8 @@ impl Default for ConnVars {
             // next_pace_time: Instant::now(),
             lost_seqnos: BTreeSet::new(),
             last_loss: None,
-            cc: Box::new(Cubic::new(0.7, 0.4)),
-            // cc: Box::new(Highspeed::new(1)),
+            // cc: Box::new(Cubic::new(0.7, 0.4)),
+            cc: Box::new(Highspeed::new(1)),
             pacer: Pacer::new(Duration::from_millis(1)),
             // cc: Box::new(Trivial::new(300)),
         }
