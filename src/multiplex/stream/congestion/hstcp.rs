@@ -40,9 +40,9 @@ impl CongestionControl for Highspeed {
 
     fn mark_loss(&mut self) {
         log::debug!("loss!!! => {:.2}", self.cwnd);
-        self.cwnd = (self.cwnd * 0.5)
+        self.cwnd = (self.cwnd * 0.7)
             .max(1.0)
-            .max(self.bdp as f64 * 0.8)
+            // .max(self.bdp as f64 * 0.8)
             .min(self.cwnd);
         self.last_loss = Instant::now();
     }
