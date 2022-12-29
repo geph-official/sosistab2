@@ -141,7 +141,7 @@ impl StatsCalculator {
             let to_del = self.packets.keys().next().copied().unwrap();
             self.packets.remove(&to_del);
         }
-        if self.acked > 100000 {
+        if self.acked > 10000 {
             self.acked /= 2;
             self.lost /= 2;
 
