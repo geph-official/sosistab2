@@ -170,12 +170,15 @@ impl Pipe for ObfsTlsPipe {
 
     fn get_stats(&self) -> PipeStats {
         let pings = self.pings.read();
-        let latency: Duration = pings
-            .iter()
-            .copied()
-            .fold(Duration::from_secs(0), |d, p| d + p)
-            .max(Duration::from_secs(1))
-            / (pings.len() as u32).max(1);
+        let mut pings_vec = pings.clone();
+        let pings_vec = pings_vec.make_contiguous();
+        pings_vec.sort_unstable();
+        let latency = if pings_vec.is_empty() {
+            Duration::from_secs(1)
+        } else {
+            // 10th percentile
+            pings_vec[pings_vec.len() / 10]
+        };
         let jitter = Duration::from_secs_f64(
             (pings
                 .iter()

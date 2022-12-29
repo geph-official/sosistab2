@@ -1,7 +1,8 @@
 use crate::PipeStats;
 use derivative::Derivative;
+use itertools::Itertools;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     time::{Duration, Instant},
 };
 
@@ -30,7 +31,7 @@ pub(crate) struct StatsCalculator {
     acked_qualified: u64,
     lost_qualified: u64,
 
-    latency_sum: Duration,
+    latencies: VecDeque<Duration>,
     variance_sum: f64,
     last_latency: Duration,
 
@@ -49,10 +50,16 @@ impl StatsCalculator {
         let loss_qualified = self.lost_qualified.max(1) as f64
             / (self.acked_qualified + self.lost_qualified).max(1) as f64;
 
+        let mut latencies = self.latencies.iter().copied().collect_vec();
+        latencies.sort_unstable();
+
         PipeStats {
             dead: self.dead,
             loss: loss_total.min(loss_qualified).min(0.3),
-            latency: self.latency_sum.max(Duration::from_secs(1)) / (self.acked.max(1) as u32),
+            latency: latencies
+                .get(latencies.len() / 10)
+                .copied()
+                .unwrap_or_else(|| Duration::from_secs(1)),
             jitter: Duration::from_secs_f64(
                 (self.variance_sum / (self.acked).max(1) as f64).sqrt(),
             ),
@@ -74,7 +81,7 @@ impl StatsCalculator {
                     .unwrap_or_else(Instant::now),
             );
             let this_latency = ack_time.saturating_duration_since(existing.send_time);
-            self.latency_sum += this_latency;
+            self.latencies.push_back(this_latency);
             self.variance_sum +=
                 (self.last_latency.as_secs_f64() - this_latency.as_secs_f64()).powi(2);
             self.acked += 1;
@@ -138,7 +145,7 @@ impl StatsCalculator {
             self.acked /= 2;
             self.lost /= 2;
 
-            self.latency_sum /= 2;
+            self.latencies = self.latencies.split_off(self.latencies.len() / 2);
             self.variance_sum /= 2.0;
         }
         if self.acked_qualified > 1000 {
