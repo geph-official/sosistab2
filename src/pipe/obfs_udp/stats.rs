@@ -45,7 +45,7 @@ impl StatsCalculator {
 
     /// Calculates stats based on recent data.
     pub fn get_stats(&self) -> PipeStats {
-        log::trace!("calculating stats from {:?}", self);
+        log::debug!("calculating stats ");
         let loss_total = self.lost.max(1) as f64 / (self.acked + self.lost).max(1) as f64;
         let loss_qualified = self.lost_qualified.max(1) as f64
             / (self.acked_qualified + self.lost_qualified).max(1) as f64;
@@ -141,7 +141,7 @@ impl StatsCalculator {
             let to_del = self.packets.keys().next().copied().unwrap();
             self.packets.remove(&to_del);
         }
-        if self.acked > 10000 {
+        if self.acked > 1000 {
             self.acked /= 2;
             self.lost /= 2;
 

@@ -332,8 +332,18 @@ async fn pipe_loop(
     let mut last_incoming_seqno = 0;
 
     let mut outstanding_ping: Option<(u64, Instant, usize)> = None;
+
+    let mut loss = 0.0;
+    let mut loss_time: Option<Instant> = None;
+
     loop {
-        let loss = stats_calculator.lock().get_stats().loss;
+        let loss = if loss_time.map(|t| t.elapsed().as_secs() > 0).unwrap_or(true) {
+            loss = stats_calculator.lock().get_stats().loss;
+            loss_time = Some(Instant::now());
+            loss
+        } else {
+            loss
+        };
         let event = Event::fec_timeout(&mut fec_encoder, loss)
             .or(Event::ack_timeout(&mut ack_timer))
             .or(Event::new_in_packet(&recv_downcoded))

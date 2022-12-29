@@ -83,7 +83,7 @@ async fn listener_loop(
         b
     };
     log::warn!("sleeping 60 seconds to prevent replays...");
-    smol::Timer::after(Duration::from_secs(60)).await;
+    // smol::Timer::after(Duration::from_secs(60)).await;
     log::warn!("finished sleeping 60 seconds to prevent replays!");
     loop {
         let mut buf = [0u8; 2048];

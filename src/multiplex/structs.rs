@@ -211,6 +211,7 @@ impl PipePool {
                 .map(|(pipe, _)| pipe.clone())
                 .enumerate()
                 .min_by_key(|(_i, pipe)| {
+                    log::debug!("about to get stats");
                     let stats = pipe.get_stats();
                     if stats.samples < 10 || fastrand::usize(0..v.len()) == 0 {
                         let pipe = pipe.clone();
