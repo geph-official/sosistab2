@@ -55,7 +55,7 @@ impl StatsCalculator {
 
         PipeStats {
             dead: self.dead,
-            loss: loss_total.min(loss_qualified).min(0.3),
+            loss: loss_total.min(loss_qualified).min(0.8),
             latency: latencies
                 .get(latencies.len() / 10)
                 .copied()
