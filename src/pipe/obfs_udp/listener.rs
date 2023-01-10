@@ -1,8 +1,4 @@
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 
 use super::{listener_table::PipeTable, ObfsUdpSecret};
 use crate::{

@@ -394,6 +394,7 @@ async fn pipe_loop(
                         outstanding_ping = None;
                     }
                     PipeFrame::Data { seqno, body } => {
+                        stats_calculator.lock().set_dead(false);
                         if replay_filter.add(seqno) {
                             fec_decoder.insert_data(seqno, body.clone());
                             if let Some(whole) = defrag.insert(seqno, body) {
