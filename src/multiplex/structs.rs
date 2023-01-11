@@ -113,6 +113,8 @@ pub struct PipePool {
     recv_incoming: Receiver<(Bytes, Arc<dyn Pipe>)>,
     last_send_pipe: Mutex<Option<(Arc<dyn Pipe>, Instant)>>,
     last_recv_pipe: Mutex<Option<Arc<dyn Pipe>>>,
+
+    last_send: Mutex<Instant>,
 }
 
 impl PipePool {
@@ -127,6 +129,8 @@ impl PipePool {
             recv_incoming,
             last_send_pipe: Default::default(),
             last_recv_pipe: Default::default(),
+
+            last_send: Mutex::new(Instant::now()),
         }
     }
 
@@ -231,7 +235,11 @@ impl PipePool {
                     );
                     let this_score = stats.score();
                     if let Some(last_used) = last_used.as_ref() {
-                        if pipe.peer_addr() == last_used.peer_addr() {
+                        if pipe.peer_addr() == last_used.peer_addr()
+                            && pkt.len() as f64 / self.last_send.lock().elapsed().as_secs_f64()
+                                > 10000.0
+                        // greater than 10 KB/s
+                        {
                             return (this_score as f64 * 0.8) as _;
                         }
                     }
