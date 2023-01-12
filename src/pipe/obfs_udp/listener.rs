@@ -135,6 +135,7 @@ async fn listener_loop(
                                     long_pk: server_long_pk,
                                     eph_pk: (&server_eph_sk).into(),
                                     resume_token: encrypted_token,
+                                    client_commitment: blake3::hash(&ptext).into(),
                                 };
                                 socket
                                     .send_to(

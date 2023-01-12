@@ -33,6 +33,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use stdcode::StdcodeSerializeExt;
 /// Represents an unreliable datagram connection. Generally, this is not to be used directly, but fed into [crate::Multiplex] instances to be used as the underlying transport.
 pub struct ObfsUdpPipe {
     send_upraw: Sender<Bytes>,
@@ -152,7 +153,7 @@ impl ObfsUdpPipe {
         let my_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
         let cookie = SymmetricFromAsymmetric::new(server_pk.0);
         // construct the ClientHello message
-        let client_hello = HandshakeFrame::ClientHello {
+        let client_hello_plain = HandshakeFrame::ClientHello {
             long_pk: (&my_long_sk).into(),
             eph_pk: (&my_eph_sk).into(),
             version: 4,
@@ -161,7 +162,7 @@ impl ObfsUdpPipe {
         .to_bytes();
         // encrypt the ClientHello message
         let init_enc = ObfsAead::new(&cookie.generate_c2s());
-        let client_hello = init_enc.encrypt(&client_hello);
+        let client_hello = init_enc.encrypt(&client_hello_plain);
         // send the ClientHello
         socket.send_to(&client_hello, server_addr).await?;
 
@@ -180,8 +181,12 @@ impl ObfsUdpPipe {
             long_pk,
             eph_pk,
             resume_token,
+            client_commitment,
         } = deser_resp
         {
+            if blake3::Hash::from(client_commitment) != blake3::hash(&client_hello_plain) {
+                anyhow::bail!("the two hellos don't match")
+            }
             log::debug!("***** server hello received, calculating stuff ******");
             // finish off the handshake
             let client_resp = init_enc.encrypt(

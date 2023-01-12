@@ -17,7 +17,7 @@ socket2 = "0.3.19"
 x25519-dalek={ version = "1.1.1", features = ["serde"] }
 serde={ version = "1.0.148", features = ["derive", "rc"] }
 # bytes={ version = "1.0.0", features = ["serde"] }
-blake3= "0.3.8"
+blake3= {version="1"}
 rand= "0.7.3"
 event-listener= "2.5.3"
 futures-util = "0.3.25"

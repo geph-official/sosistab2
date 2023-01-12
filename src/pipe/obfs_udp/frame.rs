@@ -72,6 +72,8 @@ pub enum HandshakeFrame {
         eph_pk: x25519_dalek::PublicKey,
         /// This value includes all the info required to reconstruct a session, encrypted under a secret key only the server knows.
         resume_token: Bytes,
+        /// A hash of the clienthello's stdcode
+        client_commitment: [u8; 32],
     },
 
     /// Frame sent from client to server to either signal roaming, or complete an initial handshake. This is globally encrypted.

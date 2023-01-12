@@ -190,9 +190,7 @@ impl SymmetricFromAsymmetric {
     }
 
     fn generate_temp_key(&self, ctx: &str) -> [u8; 32] {
-        let mut key = [0u8; 32];
-        blake3::derive_key(ctx, self.0.as_bytes(), &mut key);
-        key
+        blake3::derive_key(ctx, self.0.as_bytes())
     }
 }
 
