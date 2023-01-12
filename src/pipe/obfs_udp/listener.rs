@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use super::{listener_table::PipeTable, ObfsUdpSecret};
 use crate::{
@@ -79,7 +83,7 @@ async fn listener_loop(
         b
     };
     log::warn!("sleeping 60 seconds to prevent replays...");
-    // smol::Timer::after(Duration::from_secs(60)).await;
+    smol::Timer::after(Duration::from_secs(60)).await;
     log::warn!("finished sleeping 60 seconds to prevent replays!");
     loop {
         let mut buf = [0u8; 2048];
@@ -129,7 +133,7 @@ async fn listener_loop(
                                 let encrypted_token = token.encrypt(&token_key);
                                 let resp = HandshakeFrame::ServerHello {
                                     long_pk: server_long_pk,
-                                    eph_pk: (&server_eph_sk).into(), // this is possible because PublicKey implements From<&E
+                                    eph_pk: (&server_eph_sk).into(),
                                     resume_token: encrypted_token,
                                 };
                                 socket
