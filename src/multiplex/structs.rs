@@ -137,7 +137,7 @@ impl PipePool {
     /// Clears all the dead pipes. Returns the number of pipes cleared.
     pub fn clear_dead(&self) -> Vec<Arc<dyn Pipe>> {
         let mut pipes = self.pipes.write();
-        let start_len = pipes.len();
+
         let mut toret = vec![];
         pipes.retain(|f| {
             let stats = f.0.get_stats();
@@ -148,6 +148,11 @@ impl PipePool {
             !stats.dead
         });
         toret
+    }
+
+    /// Obtains the list of all pipes.
+    pub fn all_pipes(&self) -> Vec<impl Pipe> {
+        self.pipes.read().iter().map(|s| s.0.clone()).collect()
     }
 
     /// Obtains the pipe last used for sending.

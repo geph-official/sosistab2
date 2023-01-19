@@ -69,6 +69,11 @@ impl Multiplex {
         self.pipe_pool.last_recv_pipe()
     }
 
+    /// Iterates through *all* the underlying pipes.
+    pub fn iter_pipes(&self) -> impl Iterator<Item = impl Pipe> + '_ {
+        self.pipe_pool.all_pipes().into_iter()
+    }
+
     /// Removes all dead pipes from the multiplex, returning how many pipes were dead.
     pub fn clear_dead_pipes(&self) -> Vec<Arc<dyn Pipe>> {
         self.pipe_pool.clear_dead()
