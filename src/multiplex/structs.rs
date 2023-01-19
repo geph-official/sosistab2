@@ -229,25 +229,25 @@ impl PipePool {
                     let stats = pipe.get_stats();
                     if fastrand::f64() < 1.0 / (1.0 + pings.len() as f64) {
                     pings.push_back((Instant::now(), None));
-                    if pings.len() > 30 {
-                        pings.pop_front();
+                        if pings.len() > 5 {
+                            pings.pop_front();
+                        }
+                        {
+                            let pipe = pipe.clone();
+                            smolscale::spawn(async move {
+                                pipe.send(Bytes::from_static(b"!!ping!!")).await;
+                            })
+                            .detach();
+                        }
                     }
-                    {
-                        let pipe = pipe.clone();
-                        smolscale::spawn(async move {
-                            pipe.send(Bytes::from_static(b"!!ping!!")).await;
-                        })
-                        .detach();
-                    }
-                }
 
                     // OUR score
                     let our_score = {
                         let dead = pings
                             .iter()
-                            .map(|p| if p.1.is_none() { 1 } else { 0 })
+                            .map(|p| i32::from(p.1.is_none()))
                             .sum::<i32>()
-                            > 5;
+                            > 3;
                         if dead {
                             f64::MAX
                         } else {

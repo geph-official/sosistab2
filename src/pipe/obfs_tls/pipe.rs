@@ -96,7 +96,7 @@ async fn send_loop(
     recv_write: Receiver<InnerMessage>,
     mut inner: async_dup::Arc<async_dup::Mutex<TlsStream<TcpStream>>>,
 ) -> anyhow::Result<()> {
-    let mut ping_timer = BatchTimer::new(Duration::from_millis(1000), 1000);
+    let mut ping_timer = BatchTimer::new(Duration::from_millis(30000), 1000);
     loop {
         let send_write = async {
             let new_write = recv_write.recv().await?;
