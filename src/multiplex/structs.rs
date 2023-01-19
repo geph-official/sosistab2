@@ -5,10 +5,13 @@ use std::{
 };
 
 use bytes::Bytes;
+use dashmap::DashMap;
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use smol::channel::{Receiver, Sender};
+use smol_str::SmolStr;
 
 use crate::Pipe;
 
@@ -105,9 +108,12 @@ impl<T: Clone> Reorderer<T> {
     }
 }
 
+type PingMap = Arc<DashMap<String, VecDeque<(Instant, Option<Duration>)>>>;
+
 #[allow(clippy::type_complexity)]
 pub struct PipePool {
     pipes: RwLock<VecDeque<(Arc<dyn Pipe>, smol::Task<()>)>>,
+    pipe_pings: PingMap,
     size_limit: usize,
     send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>,
     recv_incoming: Receiver<(Bytes, Arc<dyn Pipe>)>,
@@ -126,6 +132,7 @@ impl PipePool {
             pipes,
             size_limit,
             send_incoming,
+            pipe_pings: Default::default(),
             recv_incoming,
             last_send_pipe: Default::default(),
             last_recv_pipe: Default::default(),
@@ -173,6 +180,7 @@ impl PipePool {
 
         let arc_pipe = Arc::new(pipe);
         let task = smolscale::spawn(pipe_associated_task(
+            self.pipe_pings.clone(),
             arc_pipe.clone(),
             self.send_incoming.clone(),
         ));
@@ -203,16 +211,12 @@ impl PipePool {
             .lock()
             .as_ref()
             .map(|(k, v)| (k.clone(), *v));
-        let last_used = if let Some((last, time)) = bb {
+        if let Some((last, time)) = bb {
             if time.elapsed() < Duration::from_millis(1000) {
                 last.send(pkt).await;
                 return;
             }
-            Some(last)
-        } else {
-            None
-        };
-
+        }
         let best_pipe = {
             let v = self.pipes.read();
 
@@ -220,35 +224,54 @@ impl PipePool {
                 .map(|(pipe, _)| pipe.clone())
                 .enumerate()
                 .min_by_key(|(_i, pipe)| {
+                    let mut pings = self.pipe_pings.entry(pipe.peer_addr()).or_default();
                     log::debug!("about to get stats");
                     let stats = pipe.get_stats();
-                    if stats.samples < 10 || fastrand::usize(0..v.len()) == 0 {
+                    if fastrand::f64() < 1.0 / (1.0 + pings.len() as f64) {
+                    pings.push_back((Instant::now(), None));
+                    if pings.len() > 30 {
+                        pings.pop_front();
+                    }
+                    {
                         let pipe = pipe.clone();
                         smolscale::spawn(async move {
                             pipe.send(Bytes::from_static(b"!!ping!!")).await;
                         })
                         .detach();
                     }
-                    log::debug!(
-                        "pipe {} / {} has PING {:.2} +/- {:.2} ms, LOSS {:.2}%, SCORE {}",
+                }
+
+                    // OUR score
+                    let our_score = {
+                        let dead = pings
+                            .iter()
+                            .map(|p| if p.1.is_none() { 1 } else { 0 })
+                            .sum::<i32>()
+                            > 5;
+                        if dead {
+                            f64::MAX
+                        } else {
+                            let mut pings = pings.iter().filter_map(|s| s.1).collect_vec();
+                            pings.sort_unstable();
+                            if let Some(ping_high) = pings.get(pings.len() * 3 / 4) {
+                                ping_high.as_secs_f64() * 1000.0
+                            } else {
+                                f64::MAX
+                            }
+                        }
+                    };
+
+                    log::info!(
+                        "pipe {} / {} has PING {:.2} +/- {:.2} ms, LOSS {:.2}%, SCORE {}, OURSCORE {:.2}",
                         pipe.peer_addr(),
                         pipe.protocol(),
                         stats.latency.as_secs_f64() * 1000.0,
                         stats.jitter.as_secs_f64() * 1000.0,
                         stats.loss * 100.0,
-                        stats.score()
+                        stats.score(),
+                        our_score
                     );
-                    let this_score = stats.score();
-                    if let Some(last_used) = last_used.as_ref() {
-                        if pipe.peer_addr() == last_used.peer_addr()
-                            && pkt.len() as f64 / self.last_send.lock().elapsed().as_secs_f64()
-                                > 10000.0
-                        // greater than 10 KB/s
-                        {
-                            return (this_score as f64 * 0.8) as _;
-                        }
-                    }
-                    this_score
+                    (our_score * 1000.0) as u64
                 })
                 .map(|t| t.1)
         };
@@ -271,7 +294,15 @@ impl PipePool {
     }
 }
 
-async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>) {
+async fn pipe_associated_task(
+    ping_map: PingMap,
+    pipe: Arc<dyn Pipe>,
+    send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>,
+) {
+    ping_map.insert(pipe.peer_addr(), Default::default());
+    scopeguard::defer!({
+        ping_map.remove(&pipe.peer_addr());
+    });
     loop {
         let pkt = pipe.recv().await;
         if let Ok(pkt) = pkt {
@@ -280,7 +311,13 @@ async fn pipe_associated_task(pipe: Arc<dyn Pipe>, send_incoming: Sender<(Bytes,
                 // in this case, we just reflect back a pong
 
                 pipe.send(Bytes::from_static(b"!!pong!!")).await;
-            } else if pkt[..] != b"!!pong!!"[..] {
+            } else if pkt[..] == b"!!pong!!"[..] {
+                if let Some(mut pings) = ping_map.get_mut(&pipe.peer_addr()) {
+                    if let Some(mut back) = pings.back_mut() {
+                        back.1 = Some(back.0.elapsed())
+                    }
+                }
+            } else {
                 let _ = send_incoming.send((pkt, pipe.clone())).await;
             }
         } else {
