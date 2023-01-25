@@ -137,7 +137,7 @@ impl StatsCalculator {
 
     /// "Garbage collects"
     fn cleanup(&mut self) {
-        if self.packets.len() > 10000 {
+        if self.packets.len() > 1000 {
             let to_del = self.packets.keys().next().copied().unwrap();
             self.packets.remove(&to_del);
         }
