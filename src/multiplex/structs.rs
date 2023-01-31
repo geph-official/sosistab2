@@ -11,7 +11,6 @@ use parking_lot::{Mutex, RwLock};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use smol::channel::{Receiver, Sender};
-use smol_str::SmolStr;
 
 use crate::Pipe;
 
@@ -119,8 +118,6 @@ pub struct PipePool {
     recv_incoming: Receiver<(Bytes, Arc<dyn Pipe>)>,
     last_send_pipe: Mutex<Option<(Arc<dyn Pipe>, Instant)>>,
     last_recv_pipe: Mutex<Option<Arc<dyn Pipe>>>,
-
-    last_send: Mutex<Instant>,
 }
 
 impl PipePool {
@@ -136,25 +133,7 @@ impl PipePool {
             recv_incoming,
             last_send_pipe: Default::default(),
             last_recv_pipe: Default::default(),
-
-            last_send: Mutex::new(Instant::now()),
         }
-    }
-
-    /// Clears all the dead pipes. Returns the number of pipes cleared.
-    pub fn clear_dead(&self) -> Vec<Arc<dyn Pipe>> {
-        let mut pipes = self.pipes.write();
-
-        let mut toret = vec![];
-        pipes.retain(|f| {
-            let stats = f.0.get_stats();
-            if stats.dead {
-                log::warn!("removing dead {}/{}", f.0.peer_addr(), f.0.protocol());
-                toret.push(f.0.clone())
-            }
-            !stats.dead
-        });
-        toret
     }
 
     /// Obtains the list of all pipes.
@@ -200,7 +179,7 @@ impl PipePool {
         {
             let mut p = self.last_send_pipe.lock();
             if p.is_none() {
-                *p = Some((arc_pipe.clone(), Instant::now()));
+                *p = Some((arc_pipe, Instant::now()));
             }
         }
     }
@@ -225,10 +204,9 @@ impl PipePool {
                 .enumerate()
                 .min_by_key(|(_i, pipe)| {
                     let mut pings = self.pipe_pings.entry(pipe.peer_addr()).or_default();
-                    log::debug!("about to get stats");
-                    let stats = pipe.get_stats();
+
                     if fastrand::f64() < 1.0 / (1.0 + pings.len() as f64) {
-                    pings.push_back((Instant::now(), None));
+                        pings.push_back((Instant::now(), None));
                         if pings.len() > 5 {
                             pings.pop_front();
                         }
@@ -243,11 +221,7 @@ impl PipePool {
 
                     // OUR score
                     let our_score = {
-                        let dead = pings
-                            .iter()
-                            .map(|p| i32::from(p.1.is_none()))
-                            .sum::<i32>()
-                            > 3;
+                        let dead = pings.iter().map(|p| i32::from(p.1.is_none())).sum::<i32>() > 3;
                         if dead {
                             f64::MAX
                         } else {
@@ -262,13 +236,9 @@ impl PipePool {
                     };
 
                     log::info!(
-                        "pipe {} / {} has PING {:.2} +/- {:.2} ms, LOSS {:.2}%, SCORE {}, OURSCORE {:.2}",
+                        "pipe {} / {} OURSCORE {:.2}",
                         pipe.peer_addr(),
                         pipe.protocol(),
-                        stats.latency.as_secs_f64() * 1000.0,
-                        stats.jitter.as_secs_f64() * 1000.0,
-                        stats.loss * 100.0,
-                        stats.score(),
                         our_score
                     );
                     (our_score * 1000.0) as u64

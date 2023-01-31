@@ -1,26 +1,17 @@
-use std::{
-    collections::VecDeque,
-    net::SocketAddr,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Instant};
 
 use async_native_tls::TlsStream;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::AsyncWriteExt;
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
+
 use smol::{
     channel::{Receiver, Sender},
-    future::FutureExt,
     net::TcpStream,
 };
 
-use crate::{utilities::BatchTimer, Pipe, PipeStats};
+use crate::Pipe;
 
 use super::structs::{InnerMessage, OuterMessage};
 
@@ -28,9 +19,6 @@ pub struct ObfsTlsPipe {
     inner: async_dup::Arc<async_dup::Mutex<TlsStream<TcpStream>>>,
     send_write: Sender<InnerMessage>,
     peer_addr: SocketAddr,
-
-    pings: RwLock<VecDeque<Duration>>,
-    pings_outstanding: Arc<AtomicUsize>,
 
     peer_metadata: String,
 
@@ -44,20 +32,14 @@ impl ObfsTlsPipe {
         peer_addr: SocketAddr,
         peer_metadata: &str,
     ) -> Self {
-        let pings_outstanding = Arc::new(AtomicUsize::new(0));
         let inner = async_dup::Arc::new(async_dup::Mutex::new(inner));
         let (send_write, recv_write) = smol::channel::bounded(10);
-        let _task = smolscale::spawn(send_loop(
-            pings_outstanding.clone(),
-            recv_write,
-            inner.clone(),
-        ));
+        let _task = smolscale::spawn(send_loop(recv_write, inner.clone()));
         Self {
             inner,
             send_write,
             peer_addr,
-            pings: Default::default(),
-            pings_outstanding,
+
             peer_metadata: peer_metadata.into(),
             _task,
         }
@@ -92,38 +74,15 @@ impl ObfsTlsPipe {
 static START_INSTANT: Lazy<Instant> = Lazy::new(Instant::now);
 
 async fn send_loop(
-    pings_outstanding: Arc<AtomicUsize>,
     recv_write: Receiver<InnerMessage>,
     mut inner: async_dup::Arc<async_dup::Mutex<TlsStream<TcpStream>>>,
 ) -> anyhow::Result<()> {
-    let mut ping_timer = BatchTimer::new(Duration::from_millis(30000), 1000);
     loop {
-        let send_write = async {
-            let new_write = recv_write.recv().await?;
-            log::debug!("tls new write: {:?}", new_write);
-            anyhow::Ok(new_write)
-        };
-        let send_ping = async {
-            ping_timer.wait().await;
-            anyhow::Ok(InnerMessage::Ping(
-                START_INSTANT.elapsed().as_millis() as u64
-            ))
-        };
-        let msg = send_write.race(send_ping).await?;
-        if matches!(msg, InnerMessage::Ping(_)) {
-            ping_timer.reset();
-            let outstanding = pings_outstanding.fetch_add(1, Ordering::SeqCst);
-            log::debug!("** sending TLS ping with outstanding = {outstanding} **");
-            if outstanding > 0 {
-                ping_timer.increment();
-            }
-        } else if !matches!(msg, InnerMessage::Pong(_)) {
-            log::debug!("tickling the ping timer due to a new write");
-            ping_timer.increment();
-        }
+        let new_write = recv_write.recv().await?;
+        log::debug!("tls new write: {:?}", new_write);
         OuterMessage {
             version: 1,
-            body: stdcode::serialize(&msg)?.into(),
+            body: stdcode::serialize(&new_write)?.into(),
         }
         .write(&mut inner)
         .await?;
@@ -148,16 +107,7 @@ impl Pipe for ObfsTlsPipe {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             match inner {
                 InnerMessage::Normal(b) => return Ok(b),
-                InnerMessage::Pong(timestamp) => {
-                    let now = START_INSTANT.elapsed().as_millis() as u64;
-                    let ping = Duration::from_millis(now.saturating_sub(timestamp));
-                    self.pings_outstanding.store(0, Ordering::SeqCst);
-                    let mut pings = self.pings.write();
-                    pings.push_back(ping);
-                    if pings.len() > 100 {
-                        pings.pop_front();
-                    }
-                }
+                InnerMessage::Pong(_) => {}
                 InnerMessage::Ping(their_timestamp) => {
                     let _ = self
                         .send_write
@@ -165,39 +115,6 @@ impl Pipe for ObfsTlsPipe {
                         .await;
                 }
             }
-        }
-    }
-
-    fn get_stats(&self) -> PipeStats {
-        let pings = self.pings.read();
-        let mut pings_vec = pings.clone();
-        let pings_vec = pings_vec.make_contiguous();
-        pings_vec.sort_unstable();
-        let latency = if pings_vec.is_empty() {
-            Duration::from_secs(1)
-        } else {
-            // 10th percentile
-            pings_vec[pings_vec.len() / 10]
-        };
-        let jitter = Duration::from_secs_f64(
-            (pings
-                .iter()
-                .map(|p| (p.as_secs_f64() - latency.as_secs_f64()).powi(2))
-                .sum::<f64>()
-                / (pings.len().max(1) as f64))
-                .sqrt(),
-        );
-        log::trace!(
-            "TLS stats: latency = {:.2}ms, jitter = {:.2}ms",
-            latency.as_secs_f64() * 1000.0,
-            jitter.as_secs_f64() * 1000.0
-        );
-        PipeStats {
-            dead: self.pings_outstanding.load(Ordering::SeqCst) > 10 || self._task.is_finished(),
-            loss: 0.0,
-            latency,
-            jitter,
-            samples: pings.len(),
         }
     }
 

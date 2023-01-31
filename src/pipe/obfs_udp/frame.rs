@@ -39,7 +39,9 @@ pub enum PipeFrame {
         /// negative acknowledgements
         naks: Vec<u64>,
     },
+    #[deprecated]
     Ping(u64),
+    #[deprecated]
     Pong(u64),
 }
 

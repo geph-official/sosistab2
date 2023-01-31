@@ -68,7 +68,7 @@ impl MuxStream {
                 tracing::debug!("stream_actor died: {}", e)
             }
         });
-        let inner: ByteReceiverInner = Box::pin(recv_read.map(|s| Ok::<_, std::io::Error>(s)));
+        let inner: ByteReceiverInner = Box::pin(recv_read.map(Ok::<_, std::io::Error>));
         (
             MuxStream {
                 send_write: DArc::new(DMutex::new(send_write)),
@@ -172,7 +172,7 @@ async fn stream_actor(
     mut state: StreamState,
     mut recv_write: BipeReader,
     recv_write_urel: Receiver<Bytes>,
-    mut send_read: Sender<Bytes>,
+    send_read: Sender<Bytes>,
     send_read_urel: Sender<Bytes>,
     recv_wire_read: Receiver<Message>,
     send_wire_write: Sender<Message>,

@@ -1,4 +1,3 @@
-use crate::PipeStats;
 use derivative::Derivative;
 use itertools::Itertools;
 use std::{
@@ -153,4 +152,12 @@ impl StatsCalculator {
             self.lost_qualified /= 2;
         }
     }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct PipeStats {
+    pub dead: bool,
+    pub loss: f64, // 0 to 1
+    pub latency: Duration,
+    pub jitter: Duration,
+    pub samples: usize,
 }

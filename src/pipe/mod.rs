@@ -1,6 +1,6 @@
 mod obfs_tls;
 mod obfs_udp;
-use std::{ops::Deref, sync::Arc, time::Duration};
+use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -20,9 +20,6 @@ pub trait Pipe: Send + Sync + 'static {
     /// Receives the next datagram from the other side. If the pipe has failed, this must return an error promptly.
     async fn recv(&self) -> std::io::Result<Bytes>;
 
-    /// Returns Pipe statistics
-    fn get_stats(&self) -> PipeStats;
-
     /// Return a static string slice that identifies the protocol.
     fn protocol(&self) -> &str;
 
@@ -41,10 +38,6 @@ impl<P: Pipe + ?Sized, T: Deref<Target = P> + Send + Sync + 'static> Pipe for T 
 
     async fn recv(&self) -> std::io::Result<Bytes> {
         self.deref().recv().await
-    }
-
-    fn get_stats(&self) -> PipeStats {
-        self.deref().get_stats()
     }
 
     fn protocol(&self) -> &str {
@@ -86,28 +79,5 @@ pub struct OrPipeListener<T: PipeListener + Sized, U: PipeListener + Sized> {
 impl<T: PipeListener, U: PipeListener> PipeListener for OrPipeListener<T, U> {
     async fn accept_pipe(&self) -> std::io::Result<Arc<dyn Pipe>> {
         self.left.accept_pipe().or(self.right.accept_pipe()).await
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct PipeStats {
-    pub dead: bool,
-    pub loss: f64, // 0 to 1
-    pub latency: Duration,
-    pub jitter: Duration,
-    pub samples: usize,
-}
-
-impl PipeStats {
-    pub fn score(&self) -> u64 {
-        if self.dead {
-            u64::MAX
-        } else {
-            // Ignore loss because not all backends even report loss. In any case, congestion should show up in jitter.
-
-            // let threshold: f64 = 0.05;
-            // let n = threshold.log(self.loss).max(1.0); // number of transmissions needed so that Prob(pkt is lost) <= threshold
-            ((self.latency.as_secs_f64() + self.jitter.as_secs_f64() * 3.0) * 1000.0) as u64
-        }
     }
 }

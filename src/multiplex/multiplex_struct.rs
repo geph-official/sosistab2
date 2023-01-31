@@ -74,11 +74,6 @@ impl Multiplex {
         self.pipe_pool.all_pipes().into_iter()
     }
 
-    /// Removes all dead pipes from the multiplex, returning how many pipes were dead.
-    pub fn clear_dead_pipes(&self) -> Vec<Arc<dyn Pipe>> {
-        self.pipe_pool.clear_dead()
-    }
-
     /// Open a reliable conn to the other end.
     pub async fn open_conn(&self, additional: &str) -> std::io::Result<MuxStream> {
         let (send, recv) = smol::channel::unbounded();
