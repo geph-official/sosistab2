@@ -92,38 +92,38 @@ impl PipeTable {
         };
         match try_fwd.await {
             Ok(()) => Ok(()),
-            Err(err) => {
-                // roaming like this is highly DoS-vulnerable, so we use a blacklist mechanism.
-                if self.ip_blacklist.contains_key(&client_addr) {
-                    anyhow::bail!("bailing on blacklisted IP");
-                }
-                log::warn!(
-                    "trying all entries because initial decryption failed: {:?}",
-                    err
-                );
-                let mut table = self.table.write();
-                let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
-                // try all entries in table
-                for (key, mut back) in table_entries {
-                    if let Ok(ptext) = back.decoder.decrypt(pkt) {
-                        let msg = stdcode::deserialize(&ptext)?;
-                        let _ = back.send_downcoded.try_send(msg);
+            Err(_) => {
+                // // roaming like this is highly DoS-vulnerable, so we use a blacklist mechanism.
+                // if self.ip_blacklist.contains_key(&client_addr) {
+                //     anyhow::bail!("bailing on blacklisted IP");
+                // }
+                // log::warn!(
+                //     "trying all entries because initial decryption failed: {:?}",
+                //     err
+                // );
+                // let mut table = self.table.write();
+                // let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
+                // // try all entries in table
+                // for (key, mut back) in table_entries {
+                //     if let Ok(ptext) = back.decoder.decrypt(pkt) {
+                //         let msg = stdcode::deserialize(&ptext)?;
+                //         let _ = back.send_downcoded.try_send(msg);
 
-                        // update entry in table
-                        table.remove(&key);
-                        let task = smolscale::spawn(dn_forward_loop(
-                            self.table.clone(),
-                            self.socket.clone(),
-                            client_addr,
-                            back.encoder.clone(),
-                            back.recv_upcoded.clone(),
-                        ));
-                        back._task = Arc::new(task);
-                        table.insert(client_addr, back);
-                        return Ok(());
-                    };
-                }
-                self.ip_blacklist.insert(client_addr, ());
+                //         // update entry in table
+                //         table.remove(&key);
+                //         let task = smolscale::spawn(dn_forward_loop(
+                //             self.table.clone(),
+                //             self.socket.clone(),
+                //             client_addr,
+                //             back.encoder.clone(),
+                //             back.recv_upcoded.clone(),
+                //         ));
+                //         back._task = Arc::new(task);
+                //         table.insert(client_addr, back);
+                //         return Ok(());
+                //     };
+                // }
+                // self.ip_blacklist.insert(client_addr, ());
                 anyhow::bail!("failed to match packet against any entries in the table")
             }
         }
