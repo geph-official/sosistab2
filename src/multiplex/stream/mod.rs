@@ -203,7 +203,7 @@ async fn stream_actor(
                 tries,
                 result,
             } => {
-                let wait_interval = 2u64.pow(tries as u32) * 500u64;
+                let wait_interval = 1.1f64.powi(tries as i32) * 800f64;
                 tracing::debug!("C={} SynSent, tried {} times", stream_id, tries);
                 if tries > 5 {
                     anyhow::bail!("timeout")
