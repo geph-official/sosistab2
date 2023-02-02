@@ -205,7 +205,7 @@ async fn stream_actor(
             } => {
                 let wait_interval = 1.1f64.powi(tries as i32) * 800f64;
                 tracing::debug!("C={} SynSent, tried {} times", stream_id, tries);
-                if tries > 5 {
+                if tries > 15 {
                     anyhow::bail!("timeout")
                 }
                 let synack_evt = async {
