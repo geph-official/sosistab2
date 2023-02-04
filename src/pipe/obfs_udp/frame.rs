@@ -18,7 +18,7 @@ pub fn fragment(buff: Bytes, out: &mut Vec<Bytes>) {
 
 /// Pipe-protocol frame, encrypted with a per-session key.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum PipeFrame {
+pub enum ObfsUdpFrame {
     Data {
         /// Strictly incrementing counter of frames. Must never repeat.
         seqno: u64,
@@ -39,13 +39,9 @@ pub enum PipeFrame {
         /// negative acknowledgements
         naks: Vec<u64>,
     },
-    #[deprecated]
-    Ping(u64),
-    #[deprecated]
-    Pong(u64),
 }
 
-impl PipeFrame {
+impl ObfsUdpFrame {
     /// Pads the frame to prepare for encryption.
     pub fn pad(&self) -> Bytes {
         stdcode::serialize(self).unwrap().into()

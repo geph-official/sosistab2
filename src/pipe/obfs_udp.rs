@@ -1,3 +1,4 @@
+mod crypt;
 mod defrag;
 mod fec;
 mod frame;
@@ -10,7 +11,7 @@ use crate::{
     crypt::{triple_ecdh, ObfsAead, SymmetricFromAsymmetric, CLIENT_DN_KEY, CLIENT_UP_KEY},
     utilities::{
         sockets::{new_udp_socket_bind, MyUdpSocket},
-        BatchTimer, ReplayFilter,
+        BatchTimer,
     },
 };
 use anyhow::Context;
@@ -20,6 +21,7 @@ pub use listener::ObfsUdpListener;
 use parking_lot::Mutex;
 use priority_queue::PriorityQueue;
 use rand::rngs::OsRng;
+use replay_filter::ReplayFilter;
 use serde::{Deserialize, Serialize};
 use smol::{
     channel::{Receiver, Sender},
@@ -47,9 +49,10 @@ pub struct ObfsUdpPipe {
 
 const FEC_TIMEOUT_MS: u64 = 20;
 use self::{
+    crypt::{ObfsDecrypter, ObfsEncrypter},
     defrag::Defragmenter,
     fec::{FecDecoder, FecEncoder, ParitySpaceKey},
-    frame::{fragment, HandshakeFrame, PipeFrame},
+    frame::{fragment, HandshakeFrame, ObfsUdpFrame},
     stats::StatsCalculator,
 };
 
@@ -104,8 +107,8 @@ impl ObfsUdpPipe {
     ///
     /// The caller must arrange to drain the other end of `send_upcoded` promptly; otherwise the Pipe itself will get stuck.
     pub fn with_custom_transport(
-        recv_downcoded: Receiver<PipeFrame>,
-        send_upcoded: Sender<PipeFrame>,
+        recv_downcoded: Receiver<ObfsUdpFrame>,
+        send_upcoded: Sender<ObfsUdpFrame>,
         remote_addr: SocketAddr,
         peer_metadata: &str,
     ) -> Self {
@@ -231,56 +234,53 @@ impl ObfsUdpPipe {
 }
 
 async fn client_loop(
-    recv_upcoded: Receiver<PipeFrame>,
-    send_downcoded: Sender<PipeFrame>,
+    recv_upcoded: Receiver<ObfsUdpFrame>,
+    send_downcoded: Sender<ObfsUdpFrame>,
     socket: MyUdpSocket,
     server_addr: SocketAddr,
     shared_secret: blake3::Hash,
-) {
+) -> anyhow::Result<()> {
     let up_key = blake3::keyed_hash(CLIENT_UP_KEY, shared_secret.as_bytes());
     let dn_key = blake3::keyed_hash(CLIENT_DN_KEY, shared_secret.as_bytes());
-    let enc = ObfsAead::new(up_key.as_bytes());
-    let dec = ObfsAead::new(dn_key.as_bytes());
+    let mut enc = ObfsEncrypter::new(ObfsAead::new(up_key.as_bytes()));
+    let dec = ObfsDecrypter::new(ObfsAead::new(dn_key.as_bytes()));
 
-    loop {
-        let res: anyhow::Result<()> = async {
-            let up_loop = async {
-                loop {
-                    let msg = recv_upcoded.recv().await.context("death in UDP up loop")?;
-                    // log::debug!("serverbound: {:?}", msg);
-                    let msg = stdcode::serialize(&msg)?;
-                    let enc_msg = enc.encrypt(&msg);
+    let up_loop = async {
+        loop {
+            let msg = recv_upcoded.recv().await.context("death in UDP up loop")?;
 
-                    socket.send_to(&enc_msg, server_addr).await?;
-                }
-            };
+            let enc_msg = enc.encrypt(&msg);
+            if let Err(err) = socket.send_to(&enc_msg, server_addr).await {
+                log::error!("cannot send message: {:?}", err)
+            }
+        }
+    };
 
-            up_loop
-                .race(async {
-                    let mut buf = [0u8; 65536];
-                    loop {
-                        let (n, _) = socket.recv_from(&mut buf).await?;
-                        log::trace!("got {} bytes from server", n);
-                        let dn_msg = &buf[..n];
-                        let dec_msg = dec.decrypt(dn_msg)?;
-
-                        let deser_msg = stdcode::deserialize(&dec_msg)?;
+    up_loop
+        .race(async {
+            let mut buf = [0u8; 65536];
+            loop {
+                let frame_fut = async {
+                    let (n, _) = socket.recv_from(&mut buf).await?;
+                    log::trace!("got {} bytes from server", n);
+                    let dn_msg = &buf[..n];
+                    let dec_msg = dec.decrypt(dn_msg)?;
+                    anyhow::Ok(dec_msg)
+                };
+                match frame_fut.await {
+                    Err(err) => {
+                        log::error!("cannot recv message: {:?}", err)
+                    }
+                    Ok(deser_msg) => {
                         send_downcoded
                             .send(deser_msg)
                             .await
                             .context("death in UDP down loop")?;
                     }
-                })
-                .await
-        }
-        .await;
-        if let Err(err) = res {
-            log::warn!("client loop error: {:?}", err);
-            if err.to_string().contains("death") {
-                return;
+                }
             }
-        }
-    }
+        })
+        .await
 }
 
 #[async_trait]
@@ -314,8 +314,8 @@ impl Pipe for ObfsUdpPipe {
 /// Main processing loop for the Pipe
 async fn pipe_loop(
     recv_upraw: Receiver<Bytes>,
-    send_upcoded: Sender<PipeFrame>,
-    recv_downcoded: Receiver<PipeFrame>,
+    send_upcoded: Sender<ObfsUdpFrame>,
+    recv_downcoded: Receiver<ObfsUdpFrame>,
     send_downraw: Sender<Bytes>,
     stats_calculator: Arc<Mutex<StatsCalculator>>,
 ) -> Infallible {
@@ -361,12 +361,12 @@ async fn pipe_loop(
 
                         stats_calculator.lock().add_sent(seqno);
 
-                        let msg = PipeFrame::Data { seqno, body: bts };
+                        let msg = ObfsUdpFrame::Data { seqno, body: bts };
                         let _ = send_upcoded.try_send(msg);
                     }
                 }
                 Event::NewInPacket(pipe_frame) => match pipe_frame {
-                    PipeFrame::Data { seqno, body } => {
+                    ObfsUdpFrame::Data { seqno, body } => {
                         stats_calculator.lock().set_dead(false);
                         if replay_filter.add(seqno) {
                             fec_decoder.insert_data(seqno, body.clone());
@@ -388,7 +388,7 @@ async fn pipe_loop(
                             probably_lost_incoming.remove(&seqno);
                         }
                     }
-                    PipeFrame::Parity {
+                    ObfsUdpFrame::Parity {
                         data_frame_first,
                         data_count,
                         parity_count,
@@ -414,7 +414,7 @@ async fn pipe_loop(
                             }
                         }
                     }
-                    PipeFrame::Acks { acks, naks } => {
+                    ObfsUdpFrame::Acks { acks, naks } => {
                         let mut stats = stats_calculator.lock();
                         for (seqno, offset) in acks {
                             stats.add_ack(seqno, Duration::from_millis(offset as _));
@@ -448,7 +448,7 @@ async fn pipe_loop(
                         vv
                     };
                     let _ = send_upcoded
-                        .send(PipeFrame::Acks {
+                        .send(ObfsUdpFrame::Acks {
                             acks: unacked_incoming
                                 .drain(..)
                                 .map(|(k, v)| (k, v.elapsed().as_millis() as _))
@@ -475,8 +475,8 @@ async fn pipe_loop(
 #[derive(Debug)]
 enum Event {
     NewOutPayload(Bytes),
-    NewInPacket(PipeFrame), // either data or parity or ack request packet or acks
-    FecTimeout(Vec<PipeFrame>),
+    NewInPacket(ObfsUdpFrame), // either data or parity or ack request packet or acks
+    FecTimeout(Vec<ObfsUdpFrame>),
     AckTimeout,
 }
 
@@ -486,7 +486,7 @@ impl Event {
         Ok(Event::NewOutPayload(recv.recv().await?))
     }
 
-    pub async fn new_in_packet(recv: &Receiver<PipeFrame>) -> anyhow::Result<Self> {
+    pub async fn new_in_packet(recv: &Receiver<ObfsUdpFrame>) -> anyhow::Result<Self> {
         let in_pkt = recv.recv().await?;
         Ok(Event::NewInPacket(in_pkt))
     }

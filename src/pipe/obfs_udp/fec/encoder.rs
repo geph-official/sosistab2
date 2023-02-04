@@ -5,7 +5,7 @@ use probability::distribution::Distribution;
 
 use rustc_hash::FxHashMap;
 
-use crate::{pipe::obfs_udp::frame::PipeFrame, utilities::batchtimer::BatchTimer};
+use crate::{pipe::obfs_udp::frame::ObfsUdpFrame, utilities::batchtimer::BatchTimer};
 
 use super::{pre_encode, wrapped::WrappedReedSolomon};
 
@@ -30,7 +30,7 @@ impl FecEncoder {
         self.timer.increment();
     }
 
-    pub async fn wait_parity(&mut self, loss: f64) -> Vec<PipeFrame> {
+    pub async fn wait_parity(&mut self, loss: f64) -> Vec<ObfsUdpFrame> {
         self.timer.wait().await;
         self.timer.reset();
         if loss == 0.0 {
@@ -68,7 +68,7 @@ impl FecEncoder {
         let parity_frames = parity
             .iter()
             .enumerate()
-            .map(|(index, parity)| PipeFrame::Parity {
+            .map(|(index, parity)| ObfsUdpFrame::Parity {
                 data_frame_first: first_frame_no,
                 data_count: data_count as u8,
                 parity_count: parity_count as u8,

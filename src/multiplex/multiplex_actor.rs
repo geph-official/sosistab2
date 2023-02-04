@@ -3,6 +3,7 @@ use dashmap::DashMap;
 
 use rand::prelude::*;
 
+use replay_filter::ReplayFilter;
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
 use smol_str::SmolStr;
@@ -11,10 +12,7 @@ use std::{sync::Arc, time::Duration};
 
 use crate::multiplex::structs::Message;
 
-use crate::{
-    crypt::{triple_ecdh, NonObfsAead},
-    utilities::ReplayFilter,
-};
+use crate::crypt::{triple_ecdh, NonObfsAead};
 
 use super::{
     stream::{StreamBack, StreamState},
