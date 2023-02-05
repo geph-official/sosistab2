@@ -106,7 +106,7 @@ impl PipeTable {
 
                 anyhow::bail!("failed to match packet against any entries in the table")
             }
-            Ok(())
+            anyhow::bail!("cannot decrypt incoming")
         }
     }
 }
