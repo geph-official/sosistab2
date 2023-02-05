@@ -82,8 +82,7 @@ impl PipeTable {
             Ok(())
         } else {
             // try all the entries
-            if let Err(table) = RwLockUpgradableReadGuard::try_upgrade(table) {
-                let mut table = self.table.write();
+            if let Ok(mut table) = RwLockUpgradableReadGuard::try_upgrade(table) {
                 let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
                 // try all entries in table
                 for (key, mut back) in table_entries {
@@ -107,7 +106,7 @@ impl PipeTable {
 
                 anyhow::bail!("failed to match packet against any entries in the table")
             }
-            todo!()
+            Ok(())
         }
     }
 }
