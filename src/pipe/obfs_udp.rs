@@ -242,7 +242,7 @@ async fn client_loop(
 ) -> anyhow::Result<()> {
     let up_key = blake3::keyed_hash(CLIENT_UP_KEY, shared_secret.as_bytes());
     let dn_key = blake3::keyed_hash(CLIENT_DN_KEY, shared_secret.as_bytes());
-    let mut enc = ObfsEncrypter::new(ObfsAead::new(up_key.as_bytes()));
+    let enc = ObfsEncrypter::new(ObfsAead::new(up_key.as_bytes()));
     let dec = ObfsDecrypter::new(ObfsAead::new(dn_key.as_bytes()));
 
     let up_loop = async {

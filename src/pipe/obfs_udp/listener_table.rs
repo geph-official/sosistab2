@@ -1,6 +1,7 @@
 use anyhow::Context;
 
-use parking_lot::RwLock;
+use itertools::Itertools;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use smol::channel::{Receiver, Sender};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
@@ -19,9 +20,12 @@ pub struct PipeTable {
     socket: MyUdpSocket,
 }
 
+#[derive(Clone)]
 struct PipeBack {
     send_downcoded: Sender<ObfsUdpFrame>,
     decrypter: ObfsDecrypter,
+    encrypter: ObfsEncrypter,
+    recv_upcoded: Receiver<ObfsUdpFrame>,
 
     _task: Arc<smol::Task<anyhow::Result<()>>>,
 }
@@ -44,7 +48,7 @@ impl PipeTable {
     ) {
         let up_key = upify_shared_secret(sess_key);
         let dn_key = dnify_shared_secret(sess_key);
-        let encoder = ObfsAead::new(dn_key.as_bytes());
+        let encrypter = ObfsEncrypter::new(ObfsAead::new(dn_key.as_bytes()));
         let decrypter = ObfsDecrypter::new(ObfsAead::new(up_key.as_bytes()));
 
         // start down-forwarding actor
@@ -52,13 +56,15 @@ impl PipeTable {
             self.table.clone(),
             self.socket.clone(),
             client_addr,
-            encoder,
-            recv_upcoded,
+            encrypter.clone(),
+            recv_upcoded.clone(),
         ));
 
         let pipe_back = PipeBack {
             send_downcoded,
             decrypter,
+            encrypter,
+            recv_upcoded,
 
             _task: Arc::new(task),
         };
@@ -67,14 +73,42 @@ impl PipeTable {
 
     /// Attempts to decode and forward the packet to an existing pipe. If
     pub async fn try_forward(&mut self, pkt: &[u8], client_addr: SocketAddr) -> anyhow::Result<()> {
-        let table = self.table.read();
+        let table = self.table.upgradable_read();
         let back = table
             .get(&client_addr)
             .context("no entry in the table with this client_addr")?;
-        let msg = back.decrypter.decrypt(pkt)?;
+        if let Ok(msg) = back.decrypter.decrypt(pkt) {
+            let _ = back.send_downcoded.try_send(msg);
+            Ok(())
+        } else {
+            // try all the entries
+            if let Err(table) = RwLockUpgradableReadGuard::try_upgrade(table) {
+                let mut table = self.table.write();
+                let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
+                // try all entries in table
+                for (key, mut back) in table_entries {
+                    if let Ok(msg) = back.decrypter.decrypt(pkt) {
+                        let _ = back.send_downcoded.try_send(msg);
 
-        let _ = back.send_downcoded.try_send(msg);
-        Ok(())
+                        // update entry in table
+                        table.remove(&key);
+                        let task = smolscale::spawn(dn_forward_loop(
+                            self.table.clone(),
+                            self.socket.clone(),
+                            client_addr,
+                            back.encrypter.clone(),
+                            back.recv_upcoded.clone(),
+                        ));
+                        back._task = Arc::new(task);
+                        table.insert(client_addr, back);
+                        return Ok(());
+                    };
+                }
+
+                anyhow::bail!("failed to match packet against any entries in the table")
+            }
+            todo!()
+        }
     }
 }
 
@@ -82,10 +116,9 @@ async fn dn_forward_loop(
     table: Arc<RwLock<HashMap<SocketAddr, PipeBack>>>,
     socket: MyUdpSocket,
     client_addr: SocketAddr,
-    encrypter: ObfsAead,
+    mut encrypter: ObfsEncrypter,
     recv_upcoded: Receiver<ObfsUdpFrame>,
 ) -> anyhow::Result<()> {
-    let mut encrypter = ObfsEncrypter::new(encrypter);
     scopeguard::defer!({
         table.write().remove(&client_addr);
     });

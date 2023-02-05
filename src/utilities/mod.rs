@@ -9,7 +9,6 @@ pub use batchtimer::*;
 
 use futures_util::Future;
 use probability::prelude::Inverse;
-use rustc_hash::FxHashSet;
 
 impl<T: Future> MyFutureExt for T {}
 
