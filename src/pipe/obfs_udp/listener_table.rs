@@ -105,6 +105,8 @@ impl PipeTable {
                 }
 
                 anyhow::bail!("failed to match packet against any entries in the table")
+            } else {
+                log::warn!("cannot upgrade lock on forwarding table")
             }
             anyhow::bail!("cannot decrypt incoming")
         }
