@@ -81,33 +81,33 @@ impl PipeTable {
             let _ = back.send_downcoded.try_send(msg);
             Ok(())
         } else {
-            // try all the entries
-            if let Ok(mut table) = RwLockUpgradableReadGuard::try_upgrade(table) {
-                let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
-                // try all entries in table
-                for (key, mut back) in table_entries {
-                    if let Ok(msg) = back.decrypter.decrypt(pkt) {
-                        let _ = back.send_downcoded.try_send(msg);
+            // // try all the entries
+            // if let Ok(mut table) = RwLockUpgradableReadGuard::try_upgrade(table) {
+            //     let table_entries = table.iter().map(|s| (*s.0, s.1.clone())).collect_vec();
+            //     // try all entries in table
+            //     for (key, mut back) in table_entries {
+            //         if let Ok(msg) = back.decrypter.decrypt(pkt) {
+            //             let _ = back.send_downcoded.try_send(msg);
 
-                        // update entry in table
-                        table.remove(&key);
-                        let task = smolscale::spawn(dn_forward_loop(
-                            self.table.clone(),
-                            self.socket.clone(),
-                            client_addr,
-                            back.encrypter.clone(),
-                            back.recv_upcoded.clone(),
-                        ));
-                        back._task = Arc::new(task);
-                        table.insert(client_addr, back);
-                        return Ok(());
-                    };
-                }
+            //             // update entry in table
+            //             table.remove(&key);
+            //             let task = smolscale::spawn(dn_forward_loop(
+            //                 self.table.clone(),
+            //                 self.socket.clone(),
+            //                 client_addr,
+            //                 back.encrypter.clone(),
+            //                 back.recv_upcoded.clone(),
+            //             ));
+            //             back._task = Arc::new(task);
+            //             table.insert(client_addr, back);
+            //             return Ok(());
+            //         };
+            //     }
 
-                anyhow::bail!("failed to match packet against any entries in the table")
-            } else {
-                log::warn!("cannot upgrade lock on forwarding table")
-            }
+            //     anyhow::bail!("failed to match packet against any entries in the table")
+            // } else {
+            //     log::warn!("cannot upgrade lock on forwarding table")
+            // }
             anyhow::bail!("cannot decrypt incoming")
         }
     }

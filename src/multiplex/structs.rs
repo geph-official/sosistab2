@@ -118,11 +118,13 @@ pub struct PipePool {
     recv_incoming: Receiver<(Bytes, Arc<dyn Pipe>)>,
     last_send_pipe: Mutex<Option<(Arc<dyn Pipe>, Instant)>>,
     last_recv_pipe: Mutex<Option<Arc<dyn Pipe>>>,
+
+    naive_send: bool,
 }
 
 impl PipePool {
     /// Creates a new instance of PipePool that reads bts from up_recv and sends them down the "best" pipe available and sends pkts from all pipes to send_incoming
-    pub fn new(size_limit: usize) -> Self {
+    pub fn new(size_limit: usize, naive_send: bool) -> Self {
         let (send_incoming, recv_incoming) = smol::channel::bounded(1);
         let pipes = RwLock::new(VecDeque::new());
         Self {
@@ -133,6 +135,7 @@ impl PipePool {
             recv_incoming,
             last_send_pipe: Default::default(),
             last_recv_pipe: Default::default(),
+            naive_send,
         }
     }
 
@@ -185,6 +188,15 @@ impl PipePool {
     }
 
     pub async fn send(&self, pkt: Bytes) {
+        // If naive_send is true, we simply use the packet that we last *received* traffic from.
+        // That pipe is *probably* alive, and if not the client will be opening a new one soon.
+        if self.naive_send {
+            if let Some(pipe) = self.last_recv_pipe() {
+                pipe.send(pkt).await;
+                return;
+            }
+        }
+
         let bb = self
             .last_send_pipe
             .lock()
