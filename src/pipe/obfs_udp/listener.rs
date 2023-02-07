@@ -42,9 +42,9 @@ impl ObfsUdpListener {
         let task = smolscale::spawn(async move {
             while let Err(err) = listener_loop(
                 socket.clone(),
-                send_new_pipes,
+                send_new_pipes.clone(),
                 server_long_sk.to_public().0,
-                server_long_sk.0,
+                server_long_sk.0.clone(),
             )
             .await
             {
