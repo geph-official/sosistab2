@@ -40,7 +40,7 @@ impl ObfsUdpListener {
         let socket = new_udp_socket_bind(listen)?;
         let (send_new_pipes, recv_new_pipes) = smol::channel::bounded(1000);
         let task = smolscale::spawn(async move {
-            if let Err(err) = listener_loop(
+            while let Err(err) = listener_loop(
                 socket.clone(),
                 send_new_pipes,
                 server_long_sk.to_public().0,
@@ -49,6 +49,7 @@ impl ObfsUdpListener {
             .await
             {
                 log::error!("Oh no! The listener loop has died with an error {:?}", err);
+                smol::Timer::after(Duration::from_secs(1)).await;
             }
         });
         Ok(Self {
