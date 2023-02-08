@@ -1,9 +1,8 @@
 use std::time::Duration;
 
+use ahash::AHashMap;
 use bytes::Bytes;
 use probability::distribution::Distribution;
-
-use rustc_hash::FxHashMap;
 
 use crate::{pipe::obfs_udp::frame::ObfsUdpFrame, utilities::batchtimer::BatchTimer};
 
@@ -85,7 +84,7 @@ impl FecEncoder {
 #[derive(Debug)]
 pub struct FrameEncoder {
     // table mapping current loss in pct + run length => overhead
-    rate_table: FxHashMap<(u8, usize), usize>,
+    rate_table: AHashMap<(u8, usize), usize>,
     // target loss rate
     target_loss: u8,
 }
@@ -94,7 +93,7 @@ impl FrameEncoder {
     /// Creates a new Encoder at the given loss level.
     pub fn new(target_loss: u8) -> Self {
         FrameEncoder {
-            rate_table: FxHashMap::default(),
+            rate_table: AHashMap::default(),
             target_loss,
         }
     }

@@ -4,11 +4,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use ahash::AHashMap;
 use bytes::Bytes;
 use dashmap::DashMap;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
-use rustc_hash::FxHashMap;
+
 use serde::{Deserialize, Serialize};
 use smol::channel::{Receiver, Sender};
 
@@ -66,14 +67,14 @@ pub enum RelKind {
 
 #[derive(Clone)]
 pub struct Reorderer<T: Clone> {
-    pkts: FxHashMap<Seqno, T>,
+    pkts: AHashMap<Seqno, T>,
     min: Seqno,
 }
 
 impl<T: Clone> Default for Reorderer<T> {
     fn default() -> Self {
         Reorderer {
-            pkts: FxHashMap::default(),
+            pkts: AHashMap::default(),
             min: 0,
         }
     }

@@ -1,16 +1,16 @@
 use std::{convert::TryInto, sync::Arc};
 
+use ahash::AHashMap;
 use bytes::Bytes;
 
 use lru::LruCache;
-use rustc_hash::FxHashMap;
 
 use super::{post_decode, pre_encode, wrapped::WrappedReedSolomon};
 
 /// An out-of-band FEC reconstructor
 pub struct FecDecoder {
     data_frames: LruCache<u64, Bytes>,
-    parity_space: LruCache<ParitySpaceKey, FxHashMap<u8, Bytes>>,
+    parity_space: LruCache<ParitySpaceKey, AHashMap<u8, Bytes>>,
 }
 
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
@@ -47,7 +47,7 @@ impl FecDecoder {
         // println!("hey parity packet!");
         let hash_ref = self
             .parity_space
-            .get_or_insert_mut(parity_info, FxHashMap::default);
+            .get_or_insert_mut(parity_info, AHashMap::default);
         // if 255 is set, this means that the parity is done
         if hash_ref.get(&255).is_some() {
             return vec![];

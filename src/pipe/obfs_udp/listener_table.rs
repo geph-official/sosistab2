@@ -1,7 +1,7 @@
 use anyhow::Context;
 
-use itertools::Itertools;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+
+use parking_lot::{RwLock};
 use smol::channel::{Receiver, Sender};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
@@ -117,7 +117,7 @@ async fn dn_forward_loop(
     table: Arc<RwLock<HashMap<SocketAddr, PipeBack>>>,
     socket: MyUdpSocket,
     client_addr: SocketAddr,
-    mut encrypter: ObfsEncrypter,
+    encrypter: ObfsEncrypter,
     recv_upcoded: Receiver<ObfsUdpFrame>,
 ) -> anyhow::Result<()> {
     scopeguard::defer!({

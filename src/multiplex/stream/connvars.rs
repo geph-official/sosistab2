@@ -3,9 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use ahash::AHashSet;
 use bipe::BipeReader;
 use bytes::Bytes;
-use rustc_hash::FxHashSet;
+
 use smol::channel::{Receiver, Sender};
 
 use crate::{
@@ -23,7 +24,7 @@ pub(crate) struct ConnVars {
     pub next_free_seqno: Seqno,
 
     pub delayed_ack_timer: Option<Instant>,
-    pub ack_seqnos: FxHashSet<Seqno>,
+    pub ack_seqnos: AHashSet<Seqno>,
 
     pub reorderer: Reorderer<Bytes>,
     pub lowest_unseen: Seqno,
@@ -44,7 +45,7 @@ impl Default for ConnVars {
             next_free_seqno: 0,
 
             delayed_ack_timer: None,
-            ack_seqnos: FxHashSet::default(),
+            ack_seqnos: AHashSet::default(),
 
             reorderer: Reorderer::default(),
             lowest_unseen: 0,
