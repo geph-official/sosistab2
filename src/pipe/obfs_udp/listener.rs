@@ -195,11 +195,11 @@ async fn listener_loop(
                             }
                         }
                     } else {
-                        log::warn!("could not decode handshake")
+                        log::debug!("could not decode handshake")
                     };
                 }
                 Err(err) => {
-                    log::warn!("oh no cannot decrypt! {:?} ({})", err, pkt.len());
+                    log::debug!("oh no cannot decrypt! {:?} ({})", err, pkt.len());
                 }
             }
         }

@@ -172,7 +172,7 @@ impl PipePool {
         if v.len() > self.size_limit {
             v.pop_front();
         }
-        log::warn!("{} pipes in the mux", v.len());
+        log::debug!("{} pipes in the mux", v.len());
 
         {
             let mut p = self.last_recv_pipe.lock();
