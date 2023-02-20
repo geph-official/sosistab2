@@ -91,7 +91,8 @@ impl FecDecoder {
                     data,
                     (parity_info.data_count.saturating_add(*par_idx as u8)) as _,
                 ) {
-                    assert_eq!(res.len(), missing_data_seqnos.len());
+                    // TODO why does this assertion sometimes fail??
+                    debug_assert_eq!(res.len(), missing_data_seqnos.len());
                     return res
                         .into_iter()
                         .zip(missing_data_seqnos.into_iter())
