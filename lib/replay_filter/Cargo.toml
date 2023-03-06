@@ -10,3 +10,7 @@ license="MPL-2.0"
 [target.'cfg(fuzzing)'.dependencies]
 
 honggfuzz = "0.5"
+
+[dependencies]
+bitvec = "1.0.1"
+log = "0.4.17"
