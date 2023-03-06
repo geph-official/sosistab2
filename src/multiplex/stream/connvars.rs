@@ -4,9 +4,10 @@ use std::{
 };
 
 use ahash::AHashSet;
-use bipe::BipeReader;
+
 use bytes::Bytes;
 
+use sluice::pipe::PipeReader;
 use smol::channel::{Receiver, Sender};
 
 use crate::{
@@ -84,7 +85,7 @@ impl ConnVars {
     pub async fn process_one(
         &mut self,
         stream_id: u16,
-        recv_write: &mut BipeReader,
+        recv_write: &mut PipeReader,
         recv_write_urel: &Receiver<Bytes>,
         send_read: &Sender<Bytes>,
         send_read_urel: &Sender<Bytes>,
@@ -286,7 +287,7 @@ impl ConnVars {
     /// Gets the next event.
     async fn next_event(
         &mut self,
-        recv_write: &mut BipeReader,
+        recv_write: &mut PipeReader,
         recv_wire_read: &Receiver<Message>,
         recv_write_urel: &Receiver<Bytes>,
     ) -> anyhow::Result<ConnVarEvt> {

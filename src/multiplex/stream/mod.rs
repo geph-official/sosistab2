@@ -1,11 +1,11 @@
 use crate::multiplex::structs::{Message, RelKind};
 use async_dup::Arc as DArc;
 use async_dup::Mutex as DMutex;
-use bipe::{BipeReader, BipeWriter};
 use bytes::Bytes;
 use connvars::ConnVars;
 
 use futures_util::{stream::IntoAsyncRead, TryStream, TryStreamExt};
+use sluice::pipe::{PipeReader, PipeWriter};
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
 use smol_str::SmolStr;
@@ -31,7 +31,7 @@ type ByteReceiver = DArc<DMutex<IntoAsyncRead<ByteReceiverInner>>>;
 #[derive(Clone)]
 /// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
 pub struct MuxStream {
-    send_write: DArc<DMutex<BipeWriter>>,
+    send_write: DArc<DMutex<PipeWriter>>,
     send_write_urel: Sender<Bytes>,
     recv_read: ByteReceiver,
     recv_read_urel: Receiver<Bytes>,
@@ -47,7 +47,7 @@ impl MuxStream {
     ) -> (Self, StreamBack) {
         let (send_write_urel, recv_write_urel) = smol::channel::bounded(100);
         let (send_read_urel, recv_read_urel) = smol::channel::bounded(100);
-        let (send_write, recv_write) = bipe::bipe(MSS * 2);
+        let (recv_write, send_write) = sluice::pipe::pipe();
         let (send_read, recv_read) = smol::channel::bounded(100);
         let (send_wire_read, recv_wire_read) = smol::channel::bounded(100);
         let aic = additional_info.clone();
@@ -170,7 +170,7 @@ use StreamState::*;
 #[allow(clippy::too_many_arguments)]
 async fn stream_actor(
     mut state: StreamState,
-    mut recv_write: BipeReader,
+    mut recv_write: PipeReader,
     recv_write_urel: Receiver<Bytes>,
     send_read: Sender<Bytes>,
     send_read_urel: Sender<Bytes>,

@@ -51,8 +51,8 @@ thiserror = "1.0.37"
 
 hex= "0.4.3"
 fastrand= "1.8.0"
-# sluice="0.5"
-bipe= "0.2.2"
+sluice="0.5"  
+# Pipe= "0.2.2"
 
 probability = "0.17.0"
 
