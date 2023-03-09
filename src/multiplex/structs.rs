@@ -204,7 +204,7 @@ impl PipePool {
             .as_ref()
             .map(|(k, v)| (k.clone(), *v));
         if let Some((last, time)) = bb {
-            if time.elapsed() < Duration::from_millis(1000) {
+            if time.elapsed() < Duration::from_millis(200) {
                 last.send(pkt).await;
                 return;
             }
@@ -247,6 +247,7 @@ impl PipePool {
                             }
                         }
                     };
+                    // let our_score = our_score + fastrand::f64() * 0.02; // 20 ms uncertainty
 
                     log::info!(
                         "pipe {} / {} OURSCORE {:.2}",
