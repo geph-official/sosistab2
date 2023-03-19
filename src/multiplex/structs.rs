@@ -204,7 +204,7 @@ impl PipePool {
             .as_ref()
             .map(|(k, v)| (k.clone(), *v));
         if let Some((last, time)) = bb {
-            if time.elapsed() < Duration::from_millis(200) {
+            if time.elapsed() < Duration::from_millis(1000) {
                 last.send(pkt).await;
                 return;
             }
@@ -220,7 +220,7 @@ impl PipePool {
 
                     if fastrand::f64() < 1.0 / (1.0 + pings.len() as f64) {
                         pings.push_back((Instant::now(), None));
-                        if pings.len() > 5 {
+                        if pings.len() > 10 {
                             pings.pop_front();
                         }
                         {
