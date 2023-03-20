@@ -1,4 +1,4 @@
-use crate::multiplex::structs::*;
+use crate::multiplex::pipe_pool::*;
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     time::{Duration, Instant},

@@ -7,7 +7,7 @@ use futures_util::TryFutureExt;
 use smol::channel::{Receiver, Sender};
 use smol_str::SmolStr;
 
-use super::{structs::PipePool, MuxStream};
+use super::{pipe_pool::PipePool, MuxStream};
 
 /// A multiplex session over a sosistab session, implementing both reliable "streams" and unreliable messages.
 pub struct Multiplex {

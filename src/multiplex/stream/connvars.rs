@@ -11,7 +11,7 @@ use sluice::pipe::PipeReader;
 use smol::channel::{Receiver, Sender};
 
 use crate::{
-    multiplex::{stream::congestion::CongestionControl, structs::*},
+    multiplex::{pipe_pool::*, stream::congestion::CongestionControl},
     pacer::Pacer,
     timer::{fastsleep, fastsleep_until},
     utilities::MyFutureExt,

@@ -6,12 +6,17 @@ use std::{
 
 use ahash::AHashMap;
 use bytes::Bytes;
-use dashmap::DashMap;
-use itertools::Itertools;
+
+use event_listener::Event;
+
 use parking_lot::{Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
-use smol::channel::{Receiver, Sender};
+use smol::{
+    channel::{Receiver, Sender},
+    future::FutureExt,
+    Task,
+};
 
 use crate::Pipe;
 
@@ -108,12 +113,97 @@ impl<T: Clone> Reorderer<T> {
     }
 }
 
-type PingMap = Arc<DashMap<String, VecDeque<(Instant, Option<Duration>)>>>;
+struct SinglePipe {
+    pipe: Arc<dyn Pipe>,
+    ping_notify: Arc<Event>,
+    _assoc_task: Task<()>,
+    ping_us_accum: Option<u64>,
+    pending_ping: Option<(Instant, Task<Duration>)>,
+}
+
+impl SinglePipe {
+    /// Creates a new pipe manager.
+    fn new(pipe: Arc<dyn Pipe>, send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>) -> Self {
+        let ping_notify = Arc::new(Event::new());
+
+        let _assoc_task = smolscale::spawn(pipe_associated_task(
+            ping_notify.clone(),
+            pipe.clone(),
+            send_incoming,
+        ));
+        Self {
+            pipe: Arc::new(pipe),
+            ping_notify,
+            _assoc_task,
+            ping_us_accum: None,
+            pending_ping: None,
+        }
+    }
+    /// Starts a pinger, if one is not already in progress.
+    fn start_pinger(&mut self) {
+        self.e2e_ping();
+        let to_overwrite = self.pending_ping.is_none();
+        if to_overwrite {
+            let evlisten = self.ping_notify.listen();
+            let start_time = Instant::now();
+            let pipe = self.pipe.clone();
+            self.pending_ping = Some((
+                Instant::now(),
+                smolscale::spawn(
+                    async move {
+                        evlisten.await;
+                        start_time.elapsed()
+                    }
+                    .or(async move {
+                        for ctr in 0u128.. {
+                            log::debug!("******* ping {ctr}");
+                            pipe.send(Bytes::from_static(b"!!ping!!")).await;
+                            smol::Timer::after(Duration::from_secs(1)).await;
+                        }
+                        unreachable!()
+                    }),
+                ),
+            ));
+        }
+    }
+
+    /// Calculates the ping.
+    fn e2e_ping(&mut self) -> Option<Duration> {
+        // If pending, we attempt to merge
+        let can_merge = self
+            .pending_ping
+            .as_ref()
+            .map(|s| s.1.is_finished())
+            .unwrap_or(false);
+        if can_merge {
+            let (_, task) = self.pending_ping.take().unwrap();
+            let dur = smol::future::block_on(task).as_micros() as u64;
+            self.ping_us_accum = Some(match self.ping_us_accum {
+                Some(existing) => {
+                    if dur > existing {
+                        dur / 2 + existing / 2
+                    } else {
+                        dur / 4 + existing * 3 / 4
+                    }
+                }
+                None => dur,
+            });
+        }
+        let accum = self.ping_us_accum.map(Duration::from_micros)?;
+
+        if let Some((pending_start, _)) = self.pending_ping {
+            let elapsed = pending_start.elapsed();
+            if elapsed > accum {
+                return Some(elapsed / 2 + accum / 2);
+            }
+        }
+        Some(accum)
+    }
+}
 
 #[allow(clippy::type_complexity)]
 pub struct PipePool {
-    pipes: RwLock<VecDeque<(Arc<dyn Pipe>, smol::Task<()>)>>,
-    pipe_pings: PingMap,
+    pipes: RwLock<VecDeque<Mutex<SinglePipe>>>,
     size_limit: usize,
     send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>,
     recv_incoming: Receiver<(Bytes, Arc<dyn Pipe>)>,
@@ -132,7 +222,7 @@ impl PipePool {
             pipes,
             size_limit,
             send_incoming,
-            pipe_pings: Default::default(),
+
             recv_incoming,
             last_send_pipe: Default::default(),
             last_recv_pipe: Default::default(),
@@ -142,7 +232,11 @@ impl PipePool {
 
     /// Obtains the list of all pipes.
     pub fn all_pipes(&self) -> Vec<impl Pipe> {
-        self.pipes.read().iter().map(|s| s.0.clone()).collect()
+        self.pipes
+            .read()
+            .iter()
+            .map(|s| s.lock().pipe.clone())
+            .collect()
     }
 
     /// Obtains the pipe last used for sending.
@@ -159,31 +253,24 @@ impl PipePool {
 
     /// Adds a Pipe to the PipePool, deleting the oldest pipe if there are too many Pipes in the PipePool.
     pub fn add_pipe(&self, pipe: impl Pipe) {
-        let mut v = self.pipes.write();
-
-        let arc_pipe = Arc::new(pipe);
-        let task = smolscale::spawn(pipe_associated_task(
-            self.pipe_pings.clone(),
-            arc_pipe.clone(),
-            self.send_incoming.clone(),
-        ));
-
-        v.push_back((arc_pipe.clone(), task));
-        if v.len() > self.size_limit {
-            v.pop_front();
+        let mut pipes = self.pipes.write();
+        let pipe: Arc<dyn Pipe> = Arc::new(pipe);
+        pipes.push_back(SinglePipe::new(pipe.clone(), self.send_incoming.clone()).into());
+        if pipes.len() > self.size_limit {
+            pipes.pop_front();
         }
-        log::debug!("{} pipes in the mux", v.len());
+        log::debug!("{} pipes in the mux", pipes.len());
 
         {
             let mut p = self.last_recv_pipe.lock();
             if p.is_none() {
-                *p = Some(arc_pipe.clone());
+                *p = Some(pipe.clone());
             }
         }
         {
             let mut p = self.last_send_pipe.lock();
             if p.is_none() {
-                *p = Some((arc_pipe, Instant::now()));
+                *p = Some((pipe, Instant::now()));
             }
         }
     }
@@ -204,60 +291,28 @@ impl PipePool {
             .as_ref()
             .map(|(k, v)| (k.clone(), *v));
         if let Some((last, time)) = bb {
-            if time.elapsed() < Duration::from_millis(1000) {
+            if time.elapsed() < Duration::from_millis(200) {
                 last.send(pkt).await;
                 return;
             }
         }
         let best_pipe = {
-            let v = self.pipes.read();
+            let pipes = self.pipes.read();
 
-            v.iter()
-                .map(|(pipe, _)| pipe.clone())
+            pipes
+                .iter()
                 .enumerate()
-                .min_by_key(|(_i, pipe)| {
-                    let mut pings = self.pipe_pings.entry(pipe.peer_addr()).or_default();
-
-                    if fastrand::f64() < 1.0 / (1.0 + pings.len() as f64) {
-                        pings.push_back((Instant::now(), None));
-                        if pings.len() > 10 {
-                            pings.pop_front();
-                        }
-                        {
-                            let pipe = pipe.clone();
-                            smolscale::spawn(async move {
-                                pipe.send(Bytes::from_static(b"!!ping!!")).await;
-                            })
-                            .detach();
-                        }
+                .min_by_key(|(_i, single_pipe)| {
+                    if fastrand::f64() < 0.2 {
+                        single_pipe.lock().start_pinger();
                     }
-
-                    // OUR score
-                    let our_score = {
-                        let dead = pings.iter().map(|p| i32::from(p.1.is_none())).sum::<i32>() > 3;
-                        if dead {
-                            f64::MAX
-                        } else {
-                            let mut pings = pings.iter().filter_map(|s| s.1).collect_vec();
-                            pings.sort_unstable();
-                            if let Some(ping_high) = pings.get(pings.len() * 3 / 4) {
-                                ping_high.as_secs_f64() * 1000.0
-                            } else {
-                                f64::MAX
-                            }
-                        }
-                    };
-                    // let our_score = our_score + fastrand::f64() * 0.02; // 20 ms uncertainty
-
-                    log::info!(
-                        "pipe {} / {} OURSCORE {:.2}",
-                        pipe.peer_addr(),
-                        pipe.protocol(),
-                        our_score
-                    );
-                    (our_score * 1000.0) as u64
+                    single_pipe
+                        .lock()
+                        .e2e_ping()
+                        .unwrap_or_else(|| Duration::from_secs(10))
                 })
                 .map(|t| t.1)
+                .map(|p| p.lock().pipe.clone())
         };
         if let Some(best_pipe) = best_pipe {
             log::debug!(
@@ -279,14 +334,10 @@ impl PipePool {
 }
 
 async fn pipe_associated_task(
-    ping_map: PingMap,
+    ping_notify: Arc<Event>,
     pipe: Arc<dyn Pipe>,
     send_incoming: Sender<(Bytes, Arc<dyn Pipe>)>,
 ) {
-    ping_map.insert(pipe.peer_addr(), Default::default());
-    scopeguard::defer!({
-        ping_map.remove(&pipe.peer_addr());
-    });
     loop {
         let pkt = pipe.recv().await;
         if let Ok(pkt) = pkt {
@@ -296,11 +347,7 @@ async fn pipe_associated_task(
 
                 pipe.send(Bytes::from_static(b"!!pong!!")).await;
             } else if pkt[..] == b"!!pong!!"[..] {
-                if let Some(mut pings) = ping_map.get_mut(&pipe.peer_addr()) {
-                    if let Some(mut back) = pings.back_mut() {
-                        back.1 = Some(back.0.elapsed())
-                    }
-                }
+                ping_notify.notify(1);
             } else {
                 let _ = send_incoming.send((pkt, pipe.clone())).await;
             }

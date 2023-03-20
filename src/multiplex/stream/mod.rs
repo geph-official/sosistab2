@@ -1,4 +1,4 @@
-use crate::multiplex::structs::{Message, RelKind};
+use crate::multiplex::pipe_pool::{Message, RelKind};
 use async_dup::Arc as DArc;
 use async_dup::Mutex as DMutex;
 use bytes::Bytes;

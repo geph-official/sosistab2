@@ -1,10 +1,9 @@
-use std::{net::SocketAddr, time::Instant};
+use std::net::SocketAddr;
 
 use async_native_tls::TlsStream;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::AsyncWriteExt;
-use once_cell::sync::Lazy;
 
 use smol::{
     channel::{Receiver, Sender},
@@ -71,15 +70,13 @@ impl ObfsTlsPipe {
     }
 }
 
-static START_INSTANT: Lazy<Instant> = Lazy::new(Instant::now);
-
 async fn send_loop(
     recv_write: Receiver<InnerMessage>,
     mut inner: async_dup::Arc<async_dup::Mutex<TlsStream<TcpStream>>>,
 ) -> anyhow::Result<()> {
     loop {
         let new_write = recv_write.recv().await?;
-        log::debug!("tls new write: {:?}", new_write);
+        log::trace!("tls new write: {:?}", new_write);
         OuterMessage {
             version: 1,
             body: stdcode::serialize(&new_write)?.into(),

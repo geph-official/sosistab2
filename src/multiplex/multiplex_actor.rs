@@ -10,13 +10,13 @@ use smol_str::SmolStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{sync::Arc, time::Duration};
 
-use crate::multiplex::structs::Message;
+use crate::multiplex::pipe_pool::Message;
 
 use crate::crypt::{triple_ecdh, NonObfsAead};
 
 use super::{
+    pipe_pool::{OuterMessage, PipePool, RelKind},
     stream::{StreamBack, StreamState},
-    structs::{OuterMessage, PipePool, RelKind},
     MuxStream,
 };
 
