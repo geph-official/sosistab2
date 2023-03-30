@@ -239,6 +239,11 @@ impl PipePool {
             .collect()
     }
 
+    /// Retain only the pipes the fit this criterion.
+    pub fn retain(&self, mut f: impl FnMut(&dyn Pipe) -> bool) {
+        self.pipes.write().retain(|p| f(&p.lock().pipe))
+    }
+
     /// Obtains the pipe last used for sending.
     pub fn last_send_pipe(&self) -> Option<impl Pipe> {
         let pipe = self.last_send_pipe.lock();

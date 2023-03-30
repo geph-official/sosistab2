@@ -74,6 +74,11 @@ impl Multiplex {
         self.pipe_pool.all_pipes().into_iter()
     }
 
+    /// Retain only the pipes that fit a certain criterion.
+    pub fn retain(&self, f: impl FnMut(&dyn Pipe) -> bool) {
+        self.pipe_pool.retain(f)
+    }
+
     /// Open a reliable conn to the other end.
     pub async fn open_conn(&self, additional: &str) -> std::io::Result<MuxStream> {
         let (send, recv) = smol::channel::unbounded();
