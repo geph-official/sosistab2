@@ -4,6 +4,7 @@ use crate::{multiplex::multiplex_actor, pipe::Pipe, MuxPublic, MuxSecret};
 
 use concurrent_queue::ConcurrentQueue;
 use futures_util::TryFutureExt;
+use parking_lot::RwLock;
 use smol::channel::{Receiver, Sender};
 use smol_str::SmolStr;
 
@@ -15,6 +16,7 @@ pub struct Multiplex {
     conn_open: Sender<(SmolStr, Sender<MuxStream>)>,
     conn_accept: Receiver<MuxStream>,
     friends: ConcurrentQueue<Box<dyn Any + Send>>,
+    their_long_pk: Arc<RwLock<Option<MuxPublic>>>,
     _task: smol::Task<()>,
 }
 
@@ -23,18 +25,20 @@ fn to_ioerror<T: Into<Box<dyn std::error::Error + Send + Sync>>>(val: T) -> std:
 }
 
 impl Multiplex {
-    /// Creates a new multiplexed Pipe. If `their_long_sk` is given, verify that the other side has the given secret key.
-    pub fn new(my_long_sk: MuxSecret, their_long_sk: Option<MuxPublic>) -> Self {
-        let pipe_pool = Arc::new(PipePool::new(10, their_long_sk.is_none())); // use the naive method when we are the server
+    /// Creates a new multiplexed Pipe. If `their_long_pk` is given, verify that the other side has the given public key.
+    pub fn new(my_long_sk: MuxSecret, preshared_peer_pk: Option<MuxPublic>) -> Self {
+        let pipe_pool = Arc::new(PipePool::new(10, preshared_peer_pk.is_none())); // use the naive method when we are the server
         let (conn_open, conn_open_recv) = smol::channel::unbounded();
         let (conn_accept_send, conn_accept) = smol::channel::unbounded();
+        let bind_val = Arc::new(RwLock::new(None));
         let _task = smolscale::spawn(
             multiplex_actor::multiplex(
                 pipe_pool.clone(),
                 conn_open_recv,
                 conn_accept_send,
                 my_long_sk.0,
-                their_long_sk.map(|s| s.0),
+                preshared_peer_pk.map(|s| s.0),
+                bind_val.clone(),
             )
             .unwrap_or_else(|e| {
                 log::debug!("oh no the multiplex actor RETURNED?! {:?}", e);
@@ -43,10 +47,16 @@ impl Multiplex {
         Multiplex {
             pipe_pool, // placeholder
             conn_open,
+            their_long_pk: bind_val,
             conn_accept,
             friends: ConcurrentQueue::unbounded(),
             _task,
         }
+    }
+
+    /// Returns the other side's public key. This is useful for "binding"-type authentication on the application layer, where the other end of the Multiplex does not have a preshared public key, but a public key that can be verified by e.g. a signature. Returns `None` if it's not yet known.
+    pub fn peer_pk(&self) -> Option<MuxPublic> {
+        *self.their_long_pk.read()
     }
 
     /// Adds an arbitrary "friend" that will be dropped together with the multiplex. This is useful for managing RAII resources like tasks, tables etc that should live exactly as long as a particular multiplex.

@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use dashmap::DashMap;
 
+use parking_lot::RwLock;
 use rand::prelude::*;
 
 use replay_filter::ReplayFilter;
@@ -10,7 +11,7 @@ use smol_str::SmolStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{sync::Arc, time::Duration};
 
-use crate::multiplex::pipe_pool::Message;
+use crate::{multiplex::pipe_pool::Message, MuxPublic};
 
 use crate::crypt::{triple_ecdh, NonObfsAead};
 
@@ -26,6 +27,7 @@ pub async fn multiplex(
     conn_accept_send: Sender<MuxStream>,
     my_long_sk: x25519_dalek::StaticSecret,
     real_their_long_pk: Option<x25519_dalek::PublicKey>,
+    seen_their_long_pk: Arc<RwLock<Option<MuxPublic>>>,
 ) -> anyhow::Result<()> {
     // encryption parameters
     let my_eph_sk_send = x25519_dalek::StaticSecret::new(rand::thread_rng());
@@ -169,6 +171,7 @@ pub async fn multiplex(
                         timestamp: _,
                     } => {
                         if let Some(real) = real_their_long_pk {
+                            *seen_their_long_pk.write() = Some(MuxPublic(real));
                             if real != their_long_pk {
                                 log::warn!("dropping invalid ClientHello");
                                 continue;
@@ -318,7 +321,7 @@ pub async fn multiplex(
                                 inner.len()
                             );
                         }
-                    } // // connection opening
+                    }
                 }
             }
         }
