@@ -205,6 +205,7 @@ pub async fn multiplex(
                                 continue;
                             }
                         }
+                        *seen_their_long_pk.write() = Some(MuxPublic(their_long_pk));
                         let send_secret = triple_ecdh(
                             &my_long_sk,
                             &my_eph_sk_send,
