@@ -17,6 +17,7 @@ pub struct Multiplex {
     conn_accept: Receiver<MuxStream>,
     friends: ConcurrentQueue<Box<dyn Any + Send>>,
     their_long_pk: Arc<RwLock<Option<MuxPublic>>>,
+    our_long_pk: MuxPublic,
     _task: smol::Task<()>,
 }
 
@@ -36,7 +37,7 @@ impl Multiplex {
                 pipe_pool.clone(),
                 conn_open_recv,
                 conn_accept_send,
-                my_long_sk.0,
+                my_long_sk.0.clone(),
                 preshared_peer_pk.map(|s| s.0),
                 bind_val.clone(),
             )
@@ -50,8 +51,14 @@ impl Multiplex {
             their_long_pk: bind_val,
             conn_accept,
             friends: ConcurrentQueue::unbounded(),
+            our_long_pk: my_long_sk.to_public().clone(),
             _task,
         }
+    }
+
+    /// Returns this side's public key.
+    pub fn local_pk(&self) -> MuxPublic {
+        self.our_long_pk
     }
 
     /// Returns the other side's public key. This is useful for "binding"-type authentication on the application layer, where the other end of the Multiplex does not have a preshared public key, but a public key that can be verified by e.g. a signature. Returns `None` if it's not yet known.
