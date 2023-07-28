@@ -122,7 +122,7 @@ impl ConnVars {
                     self.inflight.unacked(),
                     self.inflight.inflight(),
                     self.cc.cwnd(),
-                    self.inflight.bdp() as usize ,
+                    self.inflight.bdp(),
                     self.inflight.lost_count(),
                     self.inflight.last_minus_first()
                 );
