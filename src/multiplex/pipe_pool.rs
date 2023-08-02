@@ -18,7 +18,7 @@ use smol::{
     Task,
 };
 
-use crate::Pipe;
+use crate::{MuxPublic, Pipe};
 
 /// A sequence number.
 pub type Seqno = u64;
@@ -27,7 +27,7 @@ pub type Seqno = u64;
 pub enum OuterMessage {
     /// Frame sent from client to server when opening a connection. This is always globally encrypted.
     ClientHello {
-        long_pk: x25519_dalek::PublicKey,
+        long_pk: MuxPublic,
         eph_pk: x25519_dalek::PublicKey,
         version: u64,
         /// seconds since the unix epoch
@@ -35,7 +35,7 @@ pub enum OuterMessage {
     },
     /// Frame sent from server to client to give a cookie for finally opening a connection.
     ServerHello {
-        long_pk: x25519_dalek::PublicKey,
+        long_pk: MuxPublic,
         eph_pk: x25519_dalek::PublicKey,
     },
 
