@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 // pub use congestion::*;
 pub use stream::MuxStream;
 
+use crate::Pipe;
+
 use self::pipe_pool::PipePool;
 
 /// A multiplex session over a sosistab session, implementing both reliable "streams" and unreliable messages.
@@ -27,26 +29,17 @@ fn to_ioerror<T: Into<Box<dyn std::error::Error + Send + Sync>>>(val: T) -> std:
 impl Multiplex {
     /// Creates a new multiplexed Pipe. If `their_long_pk` is given, verify that the other side has the given public key.
     pub fn new(my_long_sk: MuxSecret, preshared_peer_pk: Option<MuxPublic>) -> Self {
-        let pipe_pool = Arc::new(PipePool::new(10, preshared_peer_pk.is_none())); // use the naive method when we are the server
-        let (conn_open, conn_open_recv) = smol::channel::unbounded();
-        let (conn_accept_send, conn_accept) = smol::channel::unbounded();
-        Multiplex {
-            pipe_pool, // placeholder
-
-            friends: ConcurrentQueue::unbounded(),
-
-            _task,
-        }
+        todo!()
     }
 
     /// Returns this side's public key.
     pub fn local_pk(&self) -> MuxPublic {
-        self.our_long_pk
+        todo!()
     }
 
     /// Returns the other side's public key. This is useful for "binding"-type authentication on the application layer, where the other end of the Multiplex does not have a preshared public key, but a public key that can be verified by e.g. a signature. Returns `None` if it's not yet known.
     pub fn peer_pk(&self) -> Option<MuxPublic> {
-        *self.their_long_pk.read()
+        todo!()
     }
 
     /// Adds an arbitrary "friend" that will be dropped together with the multiplex. This is useful for managing RAII resources like tasks, tables etc that should live exactly as long as a particular multiplex.

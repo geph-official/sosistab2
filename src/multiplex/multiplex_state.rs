@@ -1,6 +1,11 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
+use ahash::AHashMap;
 use anyhow::Context;
+use async_event::Event;
 use bytes::Bytes;
 use dashmap::DashMap;
 use rand::Rng;
@@ -14,7 +19,7 @@ use crate::{
 
 use super::{
     pipe_pool::{Message, OuterMessage},
-    stream::StreamBack,
+    stream::StreamState,
 };
 
 /// An encapsulation of the entire state of a Multiplex.
@@ -28,24 +33,32 @@ pub struct MultiplexState {
     local_lsk: MuxSecret,
     peer_lpk: Option<MuxPublic>,
 
-    conn_tab: Arc<ConnTable>,
-
-    send_buffer: Vec<OuterMessage>,
+    stream_tab: AHashMap<u16, StreamState>,
+    // notify this when the streams need to be rescanned
+    stream_update: Event,
 }
 
 impl MultiplexState {
-    /// Encrypts a message for sending.
-    fn encrypt_send_msg(&self, msg: Message) -> anyhow::Result<OuterMessage> {
-        todo!()
+    /// "Ticks" the state forward once. Returns the time before which this method should be called again.
+    pub fn tick(&mut self, mut outgoing_callback: impl FnMut(OuterMessage)) -> Instant {
+        // encryption
+        let outgoing_callback = |msg: Message| todo!();
+
+        // iterate through every stream, ticking it, finding the minimum of the instants
+        let insta = self
+            .stream_tab
+            .values_mut()
+            .map(|stream| stream.tick(outgoing_callback))
+            .min();
+        insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
     }
 
-    /// Drains all messages produced by the multiplex state.
-    pub fn drain_send_buffer(&mut self) -> impl Iterator<Item = OuterMessage> + '_ {
-        self.send_buffer.drain(..)
-    }
-
-    /// Processes an incoming message.
-    pub fn recv_msg(&mut self, msg: OuterMessage) -> anyhow::Result<()> {
+    /// Processes an incoming message. If the message is rejected for whatever reason, an error is returned, but the state should be presumed to still be in a valid state.
+    pub fn recv_msg(
+        &mut self,
+        msg: OuterMessage,
+        mut outgoing_callback: impl FnMut(OuterMessage),
+    ) -> anyhow::Result<()> {
         match msg {
             OuterMessage::ClientHello {
                 long_pk,
@@ -68,7 +81,7 @@ impl MultiplexState {
                     long_pk: self.local_lsk.to_public(),
                     eph_pk: (&self.local_esk_recv).into(),
                 };
-                self.send_buffer.push(our_hello);
+                outgoing_callback(our_hello);
                 Ok(())
             }
             OuterMessage::ServerHello { long_pk, eph_pk } => {
@@ -86,8 +99,9 @@ impl MultiplexState {
                 Ok(())
             }
             OuterMessage::EncryptedMsg { inner } => {
-                let recv_aead = &self
+                let recv_aead = self
                     .recv_aead
+                    .as_ref()
                     .context("cannot decrypt messages without receive-side symmetric key")?;
                 let (nonce, inner) = recv_aead.decrypt(&inner)?;
                 if !self.replay_filter.add(nonce) {
@@ -97,77 +111,44 @@ impl MultiplexState {
                     stdcode::deserialize(&inner).context("could not deserialize message")?;
                 match &inner {
                     Message::Rel {
-                        kind,
+                        kind: RelKind::Syn,
                         stream_id,
-                        seqno,
-                        payload,
+                        seqno: _,
+                        payload: _,
                     } => {
-                        if self.conn_tab.get_stream(*stream_id).is_some() {
-                            log::trace!("syn recv {} REACCEPT", stream_id);
-                            let msg = Message::Rel {
-                                kind: RelKind::SynAck,
-                                stream_id: *stream_id,
-                                seqno: 0,
-                                payload: Bytes::copy_from_slice(&[]),
-                            };
-                            let msg = self
-                                .encrypt_send_msg(msg)
-                                .context("cannot encrypted syn-ack response to syn")?;
-                            self.send_buffer.push(msg);
+                        if let Some(stream) = self.stream_tab.get_mut(stream_id) {
+                            stream.inject_incoming(inner);
+                            self.stream_update.notify_one();
                         } else {
                             log::trace!("syn recv {} ACCEPT", stream_id);
-                            todo!("nyonyo wtd to open a stream properly")
+                            // create a new stream in the right state. we don't need to do anything else
+                            let mut stream = StreamState::new_syn_received(*stream_id);
+                            let stream_id = *stream_id;
+                            stream.inject_incoming(inner);
+                            self.stream_tab.insert(stream_id, stream);
+                            self.stream_update.notify_one();
                         }
                     }
-                    Message::Urel { stream_id, payload } => {
-                        let stream = self
-                            .conn_tab
-                            .get_stream(*stream_id)
-                            .context("urel with unkown stream id")?;
-                        stream.process(inner);
+                    Message::Rel {
+                        kind: _,
+                        stream_id,
+                        seqno: _,
+                        payload: _,
                     }
+                    | Message::Urel {
+                        stream_id,
+                        payload: _,
+                    } => {
+                        let stream = self
+                            .stream_tab
+                            .get_mut(stream_id)
+                            .context("urel with unknown stream id")?;
+                        stream.inject_incoming(inner);
+                    }
+
                     Message::Empty => {}
                 }
                 Ok(())
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct ConnTable {
-    /// Maps IDs to Stream back handles.
-    sid_to_stream: DashMap<u16, StreamBack>,
-}
-
-impl ConnTable {
-    fn get_stream(&self, sid: u16) -> Option<StreamBack> {
-        let x = self.sid_to_stream.get(&sid)?;
-        Some(x.clone())
-    }
-
-    fn set_stream(&self, id: u16, handle: StreamBack) {
-        self.sid_to_stream.insert(id, handle);
-    }
-
-    fn del_stream(&self, id: u16) {
-        self.sid_to_stream.remove(&id);
-    }
-
-    fn find_id(&self) -> Option<u16> {
-        loop {
-            if self.sid_to_stream.len() >= 50000 {
-                log::warn!("ran out of descriptors ({})", self.sid_to_stream.len());
-                return None;
-            }
-            let possible_id: u16 = rand::thread_rng().gen();
-            if self.sid_to_stream.get(&possible_id).is_none() {
-                log::debug!(
-                    "found id {} out of {}",
-                    possible_id,
-                    self.sid_to_stream.len()
-                );
-                break Some(possible_id);
             }
         }
     }

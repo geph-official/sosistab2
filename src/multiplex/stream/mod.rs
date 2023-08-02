@@ -9,10 +9,17 @@ use sluice::pipe::{PipeReader, PipeWriter};
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
 use smol_str::SmolStr;
-use std::{pin::Pin, sync::Arc, task::Context, task::Poll, time::Duration};
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::Context,
+    task::Poll,
+    time::{Duration, Instant},
+};
 mod congestion;
 mod connvars;
 mod inflight;
+mod stream_state;
 
 pub const MSS: usize = 16384; // pretty large MSS; rely on underlying transport to fragment
 const MAX_WAIT_SECS: u64 = 60;
@@ -39,51 +46,6 @@ pub struct MuxStream {
 }
 
 impl MuxStream {
-    pub(crate) fn new(
-        state: StreamState,
-        output: Sender<Message>,
-        dropper: impl FnOnce() + Send + 'static,
-        additional_info: SmolStr,
-    ) -> (Self, StreamBack) {
-        let (send_write_urel, recv_write_urel) = smol::channel::bounded(100);
-        let (send_read_urel, recv_read_urel) = smol::channel::bounded(100);
-        let (recv_write, send_write) = sluice::pipe::pipe();
-        let (send_read, recv_read) = smol::channel::bounded(100);
-        let (send_wire_read, recv_wire_read) = smol::channel::bounded(100);
-        let aic = additional_info.clone();
-        let _task = smolscale::spawn(async move {
-            if let Err(e) = stream_actor(
-                state,
-                recv_write,
-                recv_write_urel,
-                send_read,
-                send_read_urel,
-                recv_wire_read,
-                output,
-                aic,
-                dropper,
-            )
-            .await
-            {
-                tracing::debug!("stream_actor died: {}", e)
-            }
-        });
-        let inner: ByteReceiverInner = Box::pin(recv_read.map(Ok::<_, std::io::Error>));
-        (
-            MuxStream {
-                send_write: DArc::new(DMutex::new(send_write)),
-                recv_read: DArc::new(DMutex::new(inner.into_async_read())),
-                send_write_urel,
-                recv_read_urel,
-                additional_info,
-            },
-            StreamBack {
-                send_wire_read,
-                _task: Arc::new(_task),
-            },
-        )
-    }
-
     /// Returns the "additional info" attached to the stream.
     pub fn additional_info(&self) -> &str {
         &self.additional_info
@@ -147,181 +109,21 @@ impl AsyncWrite for MuxStream {
     }
 }
 
-pub(crate) enum StreamState {
-    SynReceived {
-        stream_id: u16,
-    },
-    SynSent {
-        stream_id: u16,
-        tries: usize,
-        result: Sender<()>,
-    },
-    SteadyState {
-        stream_id: u16,
-        conn_vars: Box<ConnVars>,
-    },
-    Reset {
-        stream_id: u16,
-        death: smol::Timer,
-    },
-}
-use StreamState::*;
+pub struct StreamState {}
 
-#[allow(clippy::too_many_arguments)]
-async fn stream_actor(
-    mut state: StreamState,
-    mut recv_write: PipeReader,
-    recv_write_urel: Receiver<Bytes>,
-    send_read: Sender<Bytes>,
-    send_read_urel: Sender<Bytes>,
-    recv_wire_read: Receiver<Message>,
-    send_wire_write: Sender<Message>,
-    additional_info: SmolStr,
-    dropper: impl FnOnce(),
-) -> anyhow::Result<()> {
-    let _guard = scopeguard::guard((), |_| dropper());
-    loop {
-        state = match state {
-            SynReceived { stream_id } => {
-                tracing::trace!("C={} SynReceived, sending SYN-ACK", stream_id);
-                // send a synack
-                send_wire_write
-                    .send(Message::Rel {
-                        kind: RelKind::SynAck,
-                        stream_id,
-                        seqno: 0,
-                        payload: Bytes::new(),
-                    })
-                    .await?;
-                SteadyState {
-                    stream_id,
-                    conn_vars: Box::new(ConnVars::default()),
-                }
-            }
-            SynSent {
-                stream_id,
-                tries,
-                result,
-            } => {
-                let wait_interval = 1.1f64.powi(tries as i32) * 800f64;
-                tracing::debug!("C={} SynSent, tried {} times", stream_id, tries);
-                if tries > 15 {
-                    anyhow::bail!("timeout")
-                }
-                let synack_evt = async {
-                    loop {
-                        match recv_wire_read.recv().await? {
-                            Message::Rel { .. } => return Ok::<_, anyhow::Error>(true),
-                            _ => continue,
-                        }
-                    }
-                };
-                let success = synack_evt
-                    .or(async {
-                        smol::Timer::after(Duration::from_millis(wait_interval as u64)).await;
-                        Ok(false)
-                    })
-                    .await?;
-                if success {
-                    tracing::trace!("C={} SynSent got SYN-ACK", stream_id);
-                    result.send(()).await?;
-                    SteadyState {
-                        stream_id,
-                        conn_vars: Box::new(ConnVars::default()),
-                    }
-                } else {
-                    tracing::trace!("C={} SynSent timed out", stream_id);
-                    send_wire_write
-                        .send(Message::Rel {
-                            kind: RelKind::Syn,
-                            stream_id,
-                            seqno: 0,
-                            payload: Bytes::copy_from_slice(additional_info.as_bytes()),
-                        })
-                        .await?;
-                    SynSent {
-                        stream_id,
-                        tries: tries + 1,
-                        result,
-                    }
-                }
-            }
-            SteadyState {
-                stream_id,
-                mut conn_vars,
-            } => {
-                if let Err(err) = conn_vars
-                    .process_one(
-                        stream_id,
-                        &mut recv_write,
-                        &recv_write_urel,
-                        &send_read,
-                        &send_read_urel,
-                        &recv_wire_read,
-                        &send_wire_write,
-                    )
-                    .await
-                {
-                    tracing::debug!("connection reset: {:?}", err);
-                    Reset {
-                        stream_id,
-                        death: smol::Timer::after(Duration::from_secs(MAX_WAIT_SECS)),
-                    }
-                } else {
-                    SteadyState {
-                        stream_id,
-                        conn_vars,
-                    }
-                }
-            }
-            Reset {
-                stream_id,
-                mut death,
-            } => {
-                send_read.close();
-                tracing::trace!("C={} RESET", stream_id);
-                send_wire_write
-                    .send(Message::Rel {
-                        kind: RelKind::Rst,
-                        stream_id,
-                        seqno: 0,
-                        payload: Bytes::new(),
-                    })
-                    .await?;
-                let die = smol::future::race(
-                    async {
-                        (&mut death).await;
-                        true
-                    },
-                    async {
-                        if let Ok(Message::Rel { kind, .. }) = recv_wire_read.recv().await {
-                            kind == RelKind::Rst
-                        } else {
-                            smol::future::pending().await
-                        }
-                    },
-                )
-                .await;
-                if die {
-                    anyhow::bail!("exiting from reset")
-                }
-                Reset { stream_id, death }
-            }
-        }
+impl StreamState {
+    /// Creates a new StreamState, in the SYN-received state.
+    pub fn new_syn_received(stream_id: u16) -> Self {
+        todo!()
     }
-}
 
-#[derive(Clone)]
-pub(crate) struct StreamBack {
-    send_wire_read: Sender<Message>,
-    _task: Arc<smol::Task<()>>,
-}
+    /// Injects an incoming message.
+    pub fn inject_incoming(&mut self, msg: Message) {
+        todo!()
+    }
 
-impl StreamBack {
-    pub async fn process(&self, input: Message) {
-        let res = self.send_wire_read.try_send(input);
-        if let Err(e) = res {
-            tracing::trace!("stream failed to accept pkt: {}", e)
-        }
+    /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at.
+    pub fn tick(&mut self, outgoing_callback: impl FnMut(Message)) -> Instant {
+        todo!()
     }
 }
