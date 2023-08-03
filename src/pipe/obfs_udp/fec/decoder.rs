@@ -89,7 +89,7 @@ impl FecDecoder {
             for (par_idx, data) in hash_ref {
                 if let Some(res) = decoder.decode(
                     data,
-                    (parity_info.data_count.saturating_add(*par_idx as u8)) as _,
+                    (parity_info.data_count.saturating_add(*par_idx)) as _,
                 ) {
                     // TODO why does this assertion sometimes fail??
                     debug_assert_eq!(res.len(), missing_data_seqnos.len());

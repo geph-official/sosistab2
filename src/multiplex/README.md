@@ -30,3 +30,5 @@ The tricky part is avoiding the requirement to continually call `tick()` at a fi
 The next tricky part, given this, is having `tick()` run immediately after an incoming event. This is done by the external loop also polling a `ManualResetEvent` or similar inside the `StreamState` in addition to the ticking timer.
 
 There can be one huge loop at the multiplex level that simply loops through everything calling `tick()`. This saves on wakeups. On a busy server this just degenerates into calling `tick()` constantly (perhaps with a rate limit, like once per ms), but that's perfectly okay.
+
+A final tricky thing is handling stream opens. This is done by the client adding a stream in the pre-syn-sent state into the connection table, then returning the Stream handle to it. Before returning, it waits until the stream enters the connected state. Everything else will be taken care of by the usual ticking etc workflow.

@@ -44,8 +44,8 @@ impl NonObfsAead {
         12 + CHACHA20_POLY1305.tag_len()
     }
 
-    /// Encrypts a message, returning the ciphertext and integer nonce.
-    pub fn encrypt(&self, msg: &[u8]) -> (u64, Bytes) {
+    /// Encrypts a message, returning the ciphertext .
+    pub fn encrypt(&self, msg: &[u8]) -> Bytes {
         let nonce = self.nonce.fetch_add(1, Ordering::SeqCst);
         let mut bnonce = [0; 12];
         bnonce[..8].copy_from_slice(&nonce.to_le_bytes());
@@ -65,7 +65,7 @@ impl NonObfsAead {
                 .unwrap();
         }
         output.extend_from_slice(&bnonce);
-        (nonce, output.into())
+        output.into()
     }
 
     /// Decrypts a message.

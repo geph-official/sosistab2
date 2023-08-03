@@ -1,21 +1,14 @@
-use crate::multiplex::pipe_pool::{Message, RelKind};
+use crate::multiplex::pipe_pool::Message;
 use async_dup::Arc as DArc;
 use async_dup::Mutex as DMutex;
 use bytes::Bytes;
-use connvars::ConnVars;
 
-use futures_util::{stream::IntoAsyncRead, TryStream, TryStreamExt};
-use sluice::pipe::{PipeReader, PipeWriter};
+use futures_util::{stream::IntoAsyncRead, TryStream};
+use sluice::pipe::PipeWriter;
 use smol::channel::{Receiver, Sender};
 use smol::prelude::*;
 use smol_str::SmolStr;
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::Context,
-    task::Poll,
-    time::{Duration, Instant},
-};
+use std::{pin::Pin, task::Context, task::Poll, time::Instant};
 mod congestion;
 mod connvars;
 mod inflight;
@@ -113,17 +106,17 @@ pub struct StreamState {}
 
 impl StreamState {
     /// Creates a new StreamState, in the SYN-received state.
-    pub fn new_syn_received(stream_id: u16) -> Self {
+    pub fn new_syn_received(_stream_id: u16) -> Self {
         todo!()
     }
 
     /// Injects an incoming message.
-    pub fn inject_incoming(&mut self, msg: Message) {
+    pub fn inject_incoming(&mut self, _msg: Message) {
         todo!()
     }
 
     /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at.
-    pub fn tick(&mut self, outgoing_callback: impl FnMut(Message)) -> Instant {
+    pub fn tick(&mut self, _outgoing_callback: impl FnMut(Message)) -> Instant {
         todo!()
     }
 }

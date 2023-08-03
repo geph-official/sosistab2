@@ -88,6 +88,7 @@ replay_filter = {version = "0.1", path="lib/replay_filter"}
 ahash = "0.8.3"
 tachyonix = "0.2.1"
 async-event = "0.1.0"
+diatomic-waker = "0.1.0"
 
 
 [profile.dev]
