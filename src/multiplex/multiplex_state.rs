@@ -5,6 +5,7 @@ use anyhow::Context;
 
 use diatomic_waker::WakeSource;
 
+use rand::Rng;
 use rand_chacha::rand_core::OsRng;
 use replay_filter::ReplayFilter;
 use stdcode::StdcodeSerializeExt;
@@ -12,7 +13,7 @@ use stdcode::StdcodeSerializeExt;
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
     multiplex::pipe_pool::RelKind,
-    MuxPublic, MuxSecret, MuxStream,
+    MuxPublic, MuxSecret, Stream,
 };
 
 use super::{
@@ -28,8 +29,8 @@ pub struct MultiplexState {
     recv_aead: Option<NonObfsAead>,
     replay_filter: ReplayFilter,
 
-    local_lsk: MuxSecret,
-    peer_lpk: Option<MuxPublic>,
+    pub local_lsk: MuxSecret,
+    pub peer_lpk: Option<MuxPublic>,
 
     stream_tab: AHashMap<u16, StreamState>,
     // notify this when the streams need to be rescanned
@@ -77,12 +78,25 @@ impl MultiplexState {
         insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
     }
 
+    /// Starts the opening of a connection, returning a Stream in the pending state.
+    pub fn start_open_stream(&mut self) -> anyhow::Result<Stream> {
+        for _ in 0..100 {
+            let stream_id: u16 = rand::thread_rng().gen();
+            if !self.stream_tab.contains_key(&stream_id) {
+                let (new_stream, handle) = StreamState::new_pending(stream_id);
+                self.stream_tab.insert(stream_id, new_stream);
+                return Ok(handle);
+            }
+        }
+        anyhow::bail!("ran out of stream descriptors")
+    }
+
     /// Processes an incoming message. If the message is rejected for whatever reason, an error is returned, but the state should be presumed to still be in a valid state.
     pub fn recv_msg(
         &mut self,
         msg: OuterMessage,
         mut outgoing_callback: impl FnMut(OuterMessage),
-        mut accept_callback: impl FnMut(MuxStream),
+        mut accept_callback: impl FnMut(Stream),
     ) -> anyhow::Result<()> {
         match msg {
             OuterMessage::ClientHello {
@@ -147,11 +161,12 @@ impl MultiplexState {
                         } else {
                             log::trace!("syn recv {} ACCEPT", stream_id);
                             // create a new stream in the right state. we don't need to do anything else
-                            let mut stream = StreamState::new_syn_received(*stream_id);
+                            let (mut stream, handle) = StreamState::new_established(*stream_id);
                             let stream_id = *stream_id;
-                            stream.inject_incoming(inner);
+                            stream.inject_incoming(inner); // this creates the syn-ack
                             self.stream_tab.insert(stream_id, stream);
                             self.stream_update.notify();
+                            accept_callback(handle);
                         }
                     }
                     Message::Rel {

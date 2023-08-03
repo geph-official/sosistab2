@@ -18,7 +18,7 @@ use smol::{
 };
 use stdcode::StdcodeSerializeExt;
 // pub use congestion::*;
-pub use stream::MuxStream;
+pub use stream::Stream;
 
 use crate::Pipe;
 
@@ -29,7 +29,7 @@ pub struct Multiplex {
     pipe_pool: Arc<PipePool>,
     state: Arc<Mutex<MultiplexState>>,
     friends: ConcurrentQueue<Box<dyn Any + Send>>,
-    recv_accepted: Receiver<MuxStream>,
+    recv_accepted: Receiver<Stream>,
 
     _task: smol::Task<()>,
 }
@@ -66,12 +66,12 @@ impl Multiplex {
 
     /// Returns this side's public key.
     pub fn local_pk(&self) -> MuxPublic {
-        todo!()
+        self.state.lock().local_lsk.to_public()
     }
 
     /// Returns the other side's public key. This is useful for "binding"-type authentication on the application layer, where the other end of the Multiplex does not have a preshared public key, but a public key that can be verified by e.g. a signature. Returns `None` if it's not yet known.
     pub fn peer_pk(&self) -> Option<MuxPublic> {
-        todo!()
+        self.state.lock().peer_lpk
     }
 
     /// Adds an arbitrary "friend" that will be dropped together with the multiplex. This is useful for managing RAII resources like tasks, tables etc that should live exactly as long as a particular multiplex.
@@ -105,21 +105,25 @@ impl Multiplex {
     }
 
     /// Open a reliable conn to the other end.
-    pub async fn open_conn(&self, _additional: &str) -> std::io::Result<MuxStream> {
-        todo!()
+    pub async fn open_conn(&self, _additional: &str) -> std::io::Result<Stream> {
+        // create a pre-open stream, then wait until the ticking makes it open
+        let stream = self.state.lock().start_open_stream().map_err(to_ioerror)?;
+        stream.wait_connected().await?;
+        Ok(stream)
     }
 
     /// Accept a reliable conn from the other end.
-    pub async fn accept_conn(&self) -> std::io::Result<MuxStream> {
+    pub async fn accept_conn(&self) -> std::io::Result<Stream> {
         self.recv_accepted.recv().await.map_err(to_ioerror)
     }
 }
 
+/// The master loop that starts the other loops
 async fn multiplex_loop(
     state: Arc<Mutex<MultiplexState>>,
     stream_update: WakeSink,
     pipe_pool: Arc<PipePool>,
-    send_accepted: Sender<MuxStream>,
+    send_accepted: Sender<Stream>,
 ) {
     let ticker = smolscale::spawn(tick_loop(state.clone(), stream_update, pipe_pool.clone()));
     let incomer = smolscale::spawn(incoming_loop(state, pipe_pool, send_accepted));
@@ -128,10 +132,11 @@ async fn multiplex_loop(
     }
 }
 
+/// Handle incoming messages
 async fn incoming_loop(
     state: Arc<Mutex<MultiplexState>>,
     pipe_pool: Arc<PipePool>,
-    send_accepted: Sender<MuxStream>,
+    send_accepted: Sender<Stream>,
 ) -> anyhow::Result<()> {
     let mut send_queue = vec![];
     loop {
@@ -159,6 +164,7 @@ async fn incoming_loop(
     }
 }
 
+/// Handle "ticking" the streams
 async fn tick_loop(
     state: Arc<Mutex<MultiplexState>>,
     mut stream_update: WakeSink,
@@ -169,6 +175,7 @@ async fn tick_loop(
     let mut timer = smol::Timer::after(Duration::from_secs(0));
     let mut send_queue = vec![];
     loop {
+        // tick, and if any messages need to be sent, enqueue them
         let next_tick = state.lock().tick(|msg| send_queue.push(msg));
         timer.set_at(next_tick.max(Instant::now() + MIN_TICK));
 
