@@ -18,25 +18,40 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::pipe_pool::RelKind;
+use super::pipe_pool::{RelKind, Reorderer};
 mod congestion;
 
 mod inflight;
 
+const MSS: usize = 1000;
+
 /// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
 pub struct Stream {
     global_notify: WakeSource,
-    // has Mutex to make the read future Sync. There's probably a better way of doing this.
-    read_future: Mutex<Option<Pin<RecycleBox<dyn Future<Output = ()> + Send + 'static>>>>,
-    read_future_resolved: bool,
-    read_ready: Arc<async_event::Event>,
+    read_ready_future: Option<Pin<RecycleBox<dyn Future<Output = ()> + Send + 'static>>>,
+    read_ready_resolved: bool,
+    write_ready_future: Option<Pin<RecycleBox<dyn Future<Output = ()> + Send + 'static>>>,
+    write_ready_resolved: bool,
+    ready: Arc<async_event::Event>,
     inner: Arc<Mutex<StreamQueues>>,
 }
+
+/// SAFETY: because of the definition of AsyncRead, it's not possible to ever concurrently end up polling the futures in the RecycleBoxes.
+unsafe impl Sync for Stream {}
 
 impl Stream {
     /// Waits until this Stream is fully connected.
     pub async fn wait_connected(&self) -> std::io::Result<()> {
-        todo!()
+        self.ready
+            .wait_until(|| {
+                if self.inner.lock().connected {
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .await;
+        Ok(())
     }
 
     /// Returns the "additional info" attached to the stream.
@@ -64,11 +79,15 @@ impl Clone for Stream {
     fn clone(&self) -> Self {
         Self {
             global_notify: self.global_notify.clone(),
-            read_future: Mutex::new(Some(RecycleBox::into_pin(coerce_box!(RecycleBox::new(
-                async { smol::future::pending().await }
-            ))))),
-            read_future_resolved: true, // forces redoing the future on first read
-            read_ready: self.read_ready.clone(),
+            read_ready_future: Some(RecycleBox::into_pin(coerce_box!(RecycleBox::new(async {
+                smol::future::pending().await
+            })))),
+            read_ready_resolved: true, // forces redoing the future on first read
+            write_ready_future: Some(RecycleBox::into_pin(coerce_box!(RecycleBox::new(async {
+                smol::future::pending().await
+            })))),
+            write_ready_resolved: true, // forces redoing the future on first write
+            ready: self.ready.clone(),
             inner: self.inner.clone(),
         }
     }
@@ -81,10 +100,10 @@ impl AsyncRead for Stream {
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<std::io::Result<usize>> {
-        let mut read_future = self.read_future.lock().take().unwrap();
+        let mut read_future = self.read_ready_future.take().unwrap();
         // if resolved, then reset
-        if self.read_future_resolved {
-            let read_ready = self.read_ready.clone();
+        if self.read_ready_resolved {
+            let read_ready = self.ready.clone();
             let inner = self.inner.clone();
             read_future = RecycleBox::into_pin(coerce_box!(RecycleBox::recycle_pinned(
                 read_future,
@@ -92,7 +111,7 @@ impl AsyncRead for Stream {
                     read_ready
                         .wait_until(move || {
                             let inner = inner.lock();
-                            if !inner.write_stream.is_empty() {
+                            if !inner.read_stream.is_empty() {
                                 Some(())
                             } else {
                                 None
@@ -105,13 +124,13 @@ impl AsyncRead for Stream {
         // poll the recycle-boxed futures
         match read_future.poll(cx) {
             Poll::Ready(()) => {
-                self.read_future_resolved = true;
-                *self.read_future.lock() = Some(read_future);
-                Poll::Ready(self.inner.lock().write_stream.read(buf))
+                self.read_ready_resolved = true;
+                self.read_ready_future = Some(read_future);
+                Poll::Ready(self.inner.lock().read_stream.read(buf))
             }
             Poll::Pending => {
-                self.read_future_resolved = false;
-                *self.read_future.lock() = Some(read_future);
+                self.read_ready_resolved = false;
+                self.read_ready_future = Some(read_future);
                 Poll::Pending
             }
         }
@@ -120,29 +139,71 @@ impl AsyncRead for Stream {
 
 impl AsyncWrite for Stream {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        // Writes always succeed, and always tickle the ticker
-        let n = self.inner.lock().write_stream.write(buf);
-        self.global_notify.notify();
-        Poll::Ready(n)
+        let mut write_future = self.read_ready_future.take().unwrap();
+        // if resolved, then reset
+        if self.write_ready_resolved {
+            let write_ready = self.ready.clone();
+            let inner = self.inner.clone();
+            // this waits until there's less than 4xMSS bytes waiting to be written. this produces the right backpressure
+            write_future = RecycleBox::into_pin(coerce_box!(RecycleBox::recycle_pinned(
+                write_future,
+                async move {
+                    write_ready
+                        .wait_until(move || {
+                            let inner = inner.lock();
+                            if inner.write_stream.len() <= MSS * 4 {
+                                Some(())
+                            } else {
+                                None
+                            }
+                        })
+                        .await
+                }
+            )));
+        }
+        // poll the recycle-boxed futures
+        match write_future.poll(cx) {
+            Poll::Ready(()) => {
+                self.write_ready_resolved = true;
+                self.write_ready_future = Some(write_future);
+                Poll::Ready(self.inner.lock().write_stream.write(buf))
+            }
+            Poll::Pending => {
+                self.write_ready_resolved = false;
+                self.write_ready_future = Some(write_future);
+                Poll::Pending
+            }
+        }
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        todo!()
+        // TODO FILL THIS IN
+        Poll::Ready(Ok(()))
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        todo!()
+        Poll::Ready(Ok(()))
     }
 }
 
 pub(crate) struct StreamState {
     phase: StreamPhase,
     stream_id: u16,
+    incoming_queue: Vec<Message>,
     queues: Arc<Mutex<StreamQueues>>,
+    ready: Arc<async_event::Event>,
+
+    // read variables
+    read_until: u64,
+    reorderer: Reorderer<Bytes>,
+    // write variables
+    inflight: Option<Message>,
+    retransmit_time: Instant,
+    next_write_seqno: u64,
 }
 
 impl StreamState {
@@ -157,8 +218,8 @@ impl StreamState {
     }
 
     /// Injects an incoming message.
-    pub fn inject_incoming(&mut self, _msg: Message) {
-        todo!()
+    pub fn inject_incoming(&mut self, msg: Message) {
+        self.incoming_queue.push(msg);
     }
 
     /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at.
@@ -179,7 +240,22 @@ impl StreamState {
                 next_resend
             }
             StreamPhase::SynSent { next_resend } => {
-                if now >= next_resend {
+                if self.incoming_queue.drain(..).any(|msg| {
+                    matches!(
+                        msg,
+                        Message::Rel {
+                            kind: RelKind::SynAck,
+                            stream_id: _,
+                            seqno: _,
+                            payload: _
+                        }
+                    )
+                }) {
+                    self.phase = StreamPhase::Established;
+                    self.queues.lock().connected = true;
+                    self.ready.notify_all();
+                    now
+                } else if now >= next_resend {
                     outgoing_callback(Message::Rel {
                         kind: RelKind::Syn,
                         stream_id: self.stream_id,
@@ -193,8 +269,85 @@ impl StreamState {
                     next_resend
                 }
             }
-            StreamPhase::Established => todo!(),
+            StreamPhase::Established => {
+                // First, handle receiving packets. This is the easier part.
+                self.tick_read(&mut outgoing_callback);
+                // Then, handle sending packets. This involves congestion control, so it's the harder part.
+                self.tick_write(now, &mut outgoing_callback);
+                // Finally, calculate the next interval. TODO: right now this is just busy-looping again 5 ms from the present, as a placeholder!
+                now + Duration::from_millis(5)
+            }
             StreamPhase::Closed => todo!(),
+        }
+    }
+
+    fn tick_read(&mut self, mut outgoing_callback: impl FnMut(Message)) {
+        // First, put all incoming packets into the reorderer.
+        for packet in self.incoming_queue.drain(..) {
+            match packet {
+                Message::Rel {
+                    kind: RelKind::Data,
+                    stream_id: _,
+                    seqno,
+                    payload,
+                } => {
+                    self.reorderer.insert(seqno, payload);
+                }
+                _ => todo!(),
+            }
+        }
+        // Then, drain the reorderer
+        let mut gen_ack = false;
+        for (seqno, packet) in self.reorderer.take() {
+            self.read_until = self.read_until.max(seqno);
+            self.queues.lock().read_stream.write_all(&packet).unwrap();
+            self.ready.notify_all();
+            gen_ack = true;
+        }
+        // Then, generate an ack. This acks every packet up to incoming_nogap_until using the seqno field, which is the bare minimum for correct behavior.
+        if gen_ack {
+            outgoing_callback(Message::Rel {
+                kind: RelKind::DataAck,
+                stream_id: self.stream_id,
+                seqno: self.read_until,
+                payload: Bytes::new(),
+            });
+        }
+    }
+
+    fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
+        // Currently, an EXTREMELY TRIVIAL single-packet stop-and-go as a placeholder.
+        match &self.inflight {
+            Some(pkt) => {
+                // if we're past the retransmit time, just retransmit and reset the retransmit time to 1 second after now.
+                if now >= self.retransmit_time {
+                    self.retransmit_time = now + Duration::from_secs(1);
+                    outgoing_callback(pkt.clone());
+                }
+            }
+            None => {
+                // if nothing is inflight, we can pick something off of the queue and transmit it
+                let mut buf = vec![0; MSS];
+                let n = self
+                    .queues
+                    .lock()
+                    .write_stream
+                    .read(&mut buf)
+                    .unwrap_or_default();
+                if n > 0 {
+                    buf.truncate(n);
+                    let to_send = Message::Rel {
+                        kind: RelKind::Data,
+                        stream_id: self.stream_id,
+                        seqno: self.next_write_seqno,
+                        payload: buf.into(),
+                    };
+                    outgoing_callback(to_send.clone());
+                    self.next_write_seqno += 1;
+                    self.inflight = Some(to_send);
+                    self.ready.notify_all();
+                }
+            }
         }
     }
 }
@@ -210,4 +363,5 @@ enum StreamPhase {
 struct StreamQueues {
     read_stream: VecDeque<u8>,
     write_stream: VecDeque<u8>,
+    connected: bool,
 }
