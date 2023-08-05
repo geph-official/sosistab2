@@ -59,6 +59,20 @@ pub enum Message {
     Empty,
 }
 
+impl Message {
+    pub fn seqno(&self) -> u64 {
+        match self {
+            Message::Rel {
+                kind: _,
+                stream_id: _,
+                seqno,
+                payload: _,
+            } => *seqno,
+            _ => 0,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum RelKind {
     Syn,

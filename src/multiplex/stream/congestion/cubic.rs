@@ -9,7 +9,6 @@ pub struct Cubic {
     cee: f64,
     last_loss: Option<Instant>,
     cwnd_max: f64,
-    bdp: f64,
 }
 
 impl Cubic {
@@ -21,7 +20,6 @@ impl Cubic {
             cee,
             last_loss: None,
             cwnd_max: 1000.0,
-            bdp: 0.0,
         }
     }
 
@@ -40,7 +38,7 @@ impl CongestionControl for Cubic {
         (self.cwnd) as usize
     }
 
-    fn mark_ack(&mut self, current_bdp: usize, _: usize) {
+    fn mark_ack(&mut self) {
         // log::debug!("ack => {:.2}", self.cwnd);
         // if no last_loss, just exponentially increase
         let max_cwnd = self.cwnd + (1.0f64).min(32.0 / self.cwnd);
@@ -48,7 +46,6 @@ impl CongestionControl for Cubic {
         // recalculate; if there's a last loss this will fix things
         self.recalculate_cwnd();
         self.cwnd = self.cwnd.min(max_cwnd);
-        self.bdp = current_bdp as f64
     }
 
     fn mark_loss(&mut self) {

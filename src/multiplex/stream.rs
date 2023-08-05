@@ -1,4 +1,4 @@
-use crate::multiplex::pipe_pool::Message;
+use crate::multiplex::{pipe_pool::Message, stream::congestion::CongestionControl};
 
 use bytes::Bytes;
 
@@ -15,6 +15,8 @@ use std::{
     task::Poll,
     time::{Duration, Instant},
 };
+
+use self::congestion::Cubic;
 
 use super::pipe_pool::{RelKind, Reorderer};
 mod congestion;
@@ -167,7 +169,7 @@ impl AsyncWrite for Stream {
                     write_ready
                         .wait_until(move || {
                             let inner = inner.lock();
-                            if inner.write_stream.len() <= MSS * 4 {
+                            if inner.write_stream.len() <= MSS * 32 {
                                 Some(())
                             } else {
                                 None
@@ -192,12 +194,13 @@ impl AsyncWrite for Stream {
         }
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        // TODO FILL THIS IN
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.queues.lock().closed = true;
+        let _ = self.global_notify.try_send(());
         Poll::Ready(Ok(()))
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -212,10 +215,13 @@ pub(crate) struct StreamState {
     // read variables
     read_until: u64,
     reorderer: Reorderer<Bytes>,
+
     // write variables
-    inflight: Option<Message>,
-    retransmit_time: Instant,
+    inflight: VecDeque<Message>,
+    retransmit_time: Option<Instant>,
+    retrans_count: u32,
     next_write_seqno: u64,
+    congestion: Cubic,
 }
 
 impl StreamState {
@@ -247,9 +253,12 @@ impl StreamState {
 
             read_until: 0,
             reorderer: Reorderer::default(),
-            inflight: None,
-            retransmit_time: Instant::now(),
+            inflight: VecDeque::new(),
+            retransmit_time: None,
             next_write_seqno: 0,
+            retrans_count: 0,
+
+            congestion: Cubic::new(0.7, 0.4),
         };
         (state, handle)
     }
@@ -310,18 +319,36 @@ impl StreamState {
             }
             Phase::Established => {
                 // First, handle receiving packets. This is the easier part.
-                self.tick_read(&mut outgoing_callback);
+                self.tick_read(now, &mut outgoing_callback);
                 // Then, handle sending packets. This involves congestion control, so it's the harder part.
                 self.tick_write(now, &mut outgoing_callback);
+                // If closed, then die
+                if self.queues.lock().closed {
+                    self.phase = Phase::Closed;
+                }
                 // Finally, calculate the next interval. TODO: right now this is just busy-looping again 5 ms from the present, as a placeholder!
-                now + Duration::from_millis(5)
+                now + Duration::from_millis(1)
             }
-            Phase::Closed => {}
+            Phase::Closed => {
+                self.queues.lock().closed = true;
+                self.ready.notify_all();
+                for _ in self.incoming_queue.drain(..) {
+                    outgoing_callback(Message::Rel {
+                        kind: RelKind::Rst,
+                        stream_id: self.stream_id,
+                        seqno: 0,
+                        payload: Default::default(),
+                    });
+                }
+                now + Duration::from_secs(30)
+            }
         }
     }
 
-    fn tick_read(&mut self, mut outgoing_callback: impl FnMut(Message)) {
+    fn tick_read(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // First, put all incoming packets into the reorderer.
+        let mut gen_ack = false;
+        let rto = self.rto();
         for packet in self.incoming_queue.drain(..) {
             match packet {
                 Message::Rel {
@@ -330,6 +357,7 @@ impl StreamState {
                     seqno,
                     payload,
                 } => {
+                    gen_ack = true;
                     self.reorderer.insert(seqno, payload);
                 }
                 Message::Rel {
@@ -339,17 +367,22 @@ impl StreamState {
                     payload: _,
                 } => {
                     // mark every packet whose seqno is leq the given seqno as acked.
-                    // this is trivial for stop-and-go
-                    if let Some(Message::Rel {
-                        kind: _,
-                        stream_id: _,
-                        seqno,
-                        payload: _,
-                    }) = self.inflight.as_ref()
-                    {
-                        if *seqno <= acked_seqno {
-                            self.inflight = None;
+                    while let Some(first) = self.inflight.pop_front() {
+                        log::trace!(
+                            "received ack up to {acked_seqno}, considering our {}",
+                            first.seqno()
+                        );
+                        if first.seqno() > acked_seqno {
+                            self.inflight.push_front(first);
+                            break;
+                        } else {
+                            self.retransmit_time = Some(now + rto);
+                            self.congestion.mark_ack();
                         }
+                    }
+
+                    if self.inflight.is_empty() {
+                        self.retransmit_time = None;
                     }
                 }
                 Message::Rel {
@@ -370,12 +403,10 @@ impl StreamState {
             }
         }
         // Then, drain the reorderer
-        let mut gen_ack = false;
         for (seqno, packet) in self.reorderer.take() {
             self.read_until = self.read_until.max(seqno);
             self.queues.lock().read_stream.write_all(&packet).unwrap();
             self.ready.notify_all();
-            gen_ack = true;
         }
         // Then, generate an ack. This acks every packet up to incoming_nogap_until using the seqno field, which is the bare minimum for correct behavior.
         if gen_ack {
@@ -389,44 +420,53 @@ impl StreamState {
     }
 
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
-        // Currently, an EXTREMELY TRIVIAL single-packet stop-and-go as a placeholder.
-        match &self.inflight {
-            Some(pkt) => {
-                // if we're past the retransmit time, just retransmit and reset the retransmit time to 1 second after now.
-                if now >= self.retransmit_time {
-                    self.retransmit_time = now + Duration::from_secs(1);
-                    outgoing_callback(pkt.clone());
-                    log::debug!(
-                        "retransmit data packet with seqno {}",
-                        self.next_write_seqno
-                    );
-                }
+        // first, we attempt to fill the congestion window as far as possible.
+        // every time we add another segment, we also transmit it, and set the RTO.
+        let cwnd = self.congestion.cwnd();
+        while self.inflight.len() < cwnd {
+            let mut queues = self.queues.lock();
+            if queues.write_stream.is_empty() {
+                break;
             }
-            None => {
-                // if nothing is inflight, we can pick something off of the queue and transmit it
-                let mut buf = vec![0; MSS];
-                let n = self
-                    .queues
-                    .lock()
-                    .write_stream
-                    .read(&mut buf)
-                    .unwrap_or_default();
-                if n > 0 {
-                    buf.truncate(n);
-                    let to_send = Message::Rel {
-                        kind: RelKind::Data,
-                        stream_id: self.stream_id,
-                        seqno: self.next_write_seqno,
-                        payload: buf.into(),
-                    };
-                    log::debug!("sending data packet with seqno {}", self.next_write_seqno);
-                    outgoing_callback(to_send.clone());
-                    self.next_write_seqno += 1;
-                    self.inflight = Some(to_send);
-                    self.ready.notify_all();
-                }
+
+            let mut buffer = vec![0; MSS];
+            let n = queues.write_stream.read(&mut buffer).unwrap();
+            buffer.truncate(n);
+            let seqno = self.next_write_seqno;
+            self.next_write_seqno += 1;
+            let msg = Message::Rel {
+                kind: RelKind::Data,
+                stream_id: self.stream_id,
+                seqno,
+                payload: buffer.into(),
+            };
+            self.inflight.push_back(msg.clone());
+            outgoing_callback(msg);
+            if self.retransmit_time.is_none() {
+                self.retransmit_time = Some(now + Duration::from_secs(1))
+            }
+            log::debug!("filled {}/{} of cwnd", self.inflight.len(), cwnd);
+            self.ready.notify_all();
+        }
+
+        // then, we do any retransmissions if necessary
+        if let Some(retrans_time) = self.retransmit_time {
+            let rto = self.rto();
+            if now > retrans_time {
+                self.congestion.mark_loss();
+                let first = self
+                    .inflight
+                    .front()
+                    .expect("RTO expired but nothing in flight");
+                outgoing_callback(first.clone());
+                self.retrans_count += 1;
+                self.retransmit_time = Some(now + rto * 2u32.pow(self.retrans_count))
             }
         }
+    }
+
+    fn rto(&self) -> Duration {
+        Duration::from_millis(1000)
     }
 }
 
@@ -443,4 +483,5 @@ struct StreamQueues {
     read_stream: VecDeque<u8>,
     write_stream: VecDeque<u8>,
     connected: bool,
+    closed: bool,
 }

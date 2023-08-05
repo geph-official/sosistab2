@@ -1,11 +1,7 @@
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
-use std::{
-    any::Any,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use concurrent_queue::ConcurrentQueue;
 
@@ -141,7 +137,7 @@ async fn incoming_loop(
     let mut send_queue = vec![];
     loop {
         let incoming = pipe_pool.recv().await?;
-        log::debug!("incoming {} bytes", incoming.len());
+        log::trace!("incoming {} bytes", incoming.len());
         if let Ok(incoming) = stdcode::deserialize(&incoming) {
             // have the state process the message
             state
@@ -172,7 +168,7 @@ async fn tick_loop(
     pipe_pool: Arc<PipePool>,
 ) -> anyhow::Result<()> {
     let mut timer = smol::Timer::after(Duration::from_secs(0));
-    let mut next_tick = Instant::now() + Duration::from_secs(86400 * 7);
+    let mut next_tick;
     let mut send_queue = vec![];
     loop {
         next_tick = state.lock().tick(|msg| send_queue.push(msg));
