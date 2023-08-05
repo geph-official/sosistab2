@@ -16,14 +16,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use self::congestion::Cubic;
+use self::congestion::Highspeed;
 
 use super::pipe_pool::{RelKind, Reorderer};
 mod congestion;
 
 mod inflight;
 
-const MSS: usize = 1000;
+const MSS: usize = 32768;
 
 /// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
 pub struct Stream {
@@ -140,7 +140,9 @@ impl AsyncRead for Stream {
             Poll::Ready(()) => {
                 self.read_ready_resolved = true;
                 self.read_ready_future = Some(read_future);
-                Poll::Ready(self.queues.lock().read_stream.read(buf))
+                let n = self.queues.lock().read_stream.read(buf);
+                let _ = self.global_notify.try_send(());
+                Poll::Ready(n)
             }
             Poll::Pending => {
                 self.read_ready_resolved = false;
@@ -169,7 +171,8 @@ impl AsyncWrite for Stream {
                     write_ready
                         .wait_until(move || {
                             let inner = inner.lock();
-                            if inner.write_stream.len() <= MSS * 32 {
+                            if inner.write_stream.len() <= 1_000_000 {
+                                // 1 MB
                                 Some(())
                             } else {
                                 None
@@ -184,7 +187,9 @@ impl AsyncWrite for Stream {
             Poll::Ready(()) => {
                 self.write_ready_resolved = true;
                 self.write_ready_future = Some(write_future);
-                Poll::Ready(self.queues.lock().write_stream.write(buf))
+                let n = self.queues.lock().write_stream.write(buf);
+                let _ = self.global_notify.try_send(());
+                Poll::Ready(n)
             }
             Poll::Pending => {
                 self.write_ready_resolved = false;
@@ -221,7 +226,7 @@ pub(crate) struct StreamState {
     retransmit_time: Option<Instant>,
     retrans_count: u32,
     next_write_seqno: u64,
-    congestion: Cubic,
+    congestion: Highspeed,
 }
 
 impl StreamState {
@@ -258,7 +263,7 @@ impl StreamState {
             next_write_seqno: 0,
             retrans_count: 0,
 
-            congestion: Cubic::new(0.7, 0.4),
+            congestion: Highspeed::new(1),
         };
         (state, handle)
     }
@@ -326,8 +331,8 @@ impl StreamState {
                 if self.queues.lock().closed {
                     self.phase = Phase::Closed;
                 }
-                // Finally, calculate the next interval. TODO: right now this is just busy-looping again 5 ms from the present, as a placeholder!
-                now + Duration::from_millis(1)
+                // Finally, calculate the next interval.
+                self.retick_time()
             }
             Phase::Closed => {
                 self.queues.lock().closed = true;
@@ -358,6 +363,7 @@ impl StreamState {
                     payload,
                 } => {
                     gen_ack = true;
+                    log::debug!("incoming seqno {seqno}");
                     self.reorderer.insert(seqno, payload);
                 }
                 Message::Rel {
@@ -372,12 +378,16 @@ impl StreamState {
                             "received ack up to {acked_seqno}, considering our {}",
                             first.seqno()
                         );
+
                         if first.seqno() > acked_seqno {
                             self.inflight.push_front(first);
+
                             break;
                         } else {
                             self.retransmit_time = Some(now + rto);
                             self.congestion.mark_ack();
+
+                            log::debug!("{} is now acked", first.seqno());
                         }
                     }
 
@@ -426,6 +436,7 @@ impl StreamState {
         while self.inflight.len() < cwnd {
             let mut queues = self.queues.lock();
             if queues.write_stream.is_empty() {
+                queues.write_stream.shrink_to_fit();
                 break;
             }
 
@@ -445,24 +456,33 @@ impl StreamState {
             if self.retransmit_time.is_none() {
                 self.retransmit_time = Some(now + Duration::from_secs(1))
             }
-            log::debug!("filled {}/{} of cwnd", self.inflight.len(), cwnd);
             self.ready.notify_all();
+
+            log::debug!("filled {}/{} of cwnd", self.inflight.len(), cwnd);
         }
 
         // then, we do any retransmissions if necessary
         if let Some(retrans_time) = self.retransmit_time {
             let rto = self.rto();
-            if now > retrans_time {
-                self.congestion.mark_loss();
+            if now >= retrans_time {
+                if self.congestion.cwnd() >= self.inflight.len() {
+                    self.congestion.mark_loss();
+                }
                 let first = self
                     .inflight
                     .front()
                     .expect("RTO expired but nothing in flight");
+                log::debug!("RTO retransmit {}", first.seqno());
                 outgoing_callback(first.clone());
                 self.retrans_count += 1;
                 self.retransmit_time = Some(now + rto * 2u32.pow(self.retrans_count))
             }
         }
+    }
+
+    fn retick_time(&self) -> Instant {
+        self.retransmit_time
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
     }
 
     fn rto(&self) -> Duration {

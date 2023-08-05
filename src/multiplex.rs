@@ -180,6 +180,7 @@ async fn tick_loop(
         // horrifying hax
         async {
             let _ = stream_update.recv().await;
+            log::trace!("update woken");
         }
         .or(async {
             (&mut timer).await;

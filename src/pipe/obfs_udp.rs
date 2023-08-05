@@ -189,7 +189,7 @@ impl ObfsUdpPipe {
             if blake3::Hash::from(client_commitment) != blake3::hash(&client_hello_plain) {
                 anyhow::bail!("the two hellos don't match")
             }
-            log::debug!("***** server hello received, calculating stuff ******");
+            log::trace!("***** server hello received, calculating stuff ******");
             // finish off the handshake
             let client_resp = init_enc.encrypt(
                 &HandshakeFrame::ClientResume {
@@ -212,7 +212,7 @@ impl ObfsUdpPipe {
 
             // start background encrypting/decrypting + forwarding task
             let shared_secret = triple_ecdh(&my_long_sk, &my_eph_sk, &long_pk, &eph_pk);
-            log::debug!("CLIENT shared_secret: {:?}", shared_secret);
+            log::trace!("CLIENT shared_secret: {:?}", shared_secret);
             let real_sess_key = blake3::keyed_hash(
                 blake3::hash(metadata.as_bytes()).as_bytes(),
                 shared_secret.as_bytes(),
@@ -374,7 +374,7 @@ async fn pipe_loop(
                                 let _ = send_downraw.try_send(whole); // TODO why??
                             }
                             if seqno > last_incoming_seqno + 1 {
-                                log::debug!("gap in sequence numbers: {}", seqno);
+                                log::trace!("gap in sequence numbers: {}", seqno);
                                 for gap_seqno in (last_incoming_seqno + 1)..seqno {
                                     probably_lost_incoming.push(
                                         gap_seqno,

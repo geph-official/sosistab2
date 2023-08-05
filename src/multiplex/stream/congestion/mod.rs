@@ -1,6 +1,6 @@
-mod cubic;
+mod highspeed;
 
-pub use cubic::*;
+pub use highspeed::*;
 
 pub trait CongestionControl {
     /// Gets the current CWND

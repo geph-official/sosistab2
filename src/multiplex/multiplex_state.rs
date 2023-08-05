@@ -57,26 +57,22 @@ impl MultiplexState {
         }
     }
 
-    fn our_clienthello(&self) -> OuterMessage {
-        OuterMessage::ClientHello {
-            long_pk: self.local_lsk.to_public(),
-            eph_pk: (&self.local_esk_send).into(),
-            version: 1,
-            timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
-        }
-    }
-
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
     pub fn tick(&mut self, mut outgoing_callback: impl FnMut(OuterMessage)) -> Instant {
         // encryption
-        let hello = self.our_clienthello();
         let mut outgoing_callback = |msg: Message| {
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
                 outgoing_callback(OuterMessage::EncryptedMsg { inner })
             } else {
+                let hello = OuterMessage::ClientHello {
+                    long_pk: self.local_lsk.to_public(),
+                    eph_pk: (&self.local_esk_send).into(),
+                    version: 1,
+                    timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
+                };
                 log::warn!("no send aead, cannot send anything yet. sending another clienthello");
-                outgoing_callback(hello.clone());
+                outgoing_callback(hello);
             }
         };
 
@@ -172,7 +168,6 @@ impl MultiplexState {
                             stream.inject_incoming(inner);
                             let _ = self.stream_update.try_send(());
                         } else {
-                            log::trace!("syn recv {} ACCEPT", stream_id);
                             // create a new stream in the right state. we don't need to do anything else
                             let (mut stream, handle) = StreamState::new_established(
                                 self.stream_update.clone(),
@@ -200,6 +195,7 @@ impl MultiplexState {
                             .get_mut(stream_id)
                             .context("urel with unknown stream id")?;
                         stream.inject_incoming(inner);
+                        let _ = self.stream_update.try_send(());
                     }
 
                     Message::Empty => {}

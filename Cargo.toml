@@ -93,7 +93,8 @@ recycle-box = "0.2.0"
 
 
 [profile.dev]
-panic="abort"
+# panic="abort"
+opt-level=1
 
 [profile.release-dbg]
 inherits="release"
