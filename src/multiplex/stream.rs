@@ -316,7 +316,7 @@ impl StreamState {
                 // Finally, calculate the next interval. TODO: right now this is just busy-looping again 5 ms from the present, as a placeholder!
                 now + Duration::from_millis(5)
             }
-            Phase::Closed => todo!(),
+            Phase::Closed => {}
         }
     }
 
