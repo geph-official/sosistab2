@@ -14,9 +14,9 @@ use smol::{
 };
 use stdcode::StdcodeSerializeExt;
 // pub use congestion::*;
-pub use stream::Stream;
-
 use crate::Pipe;
+pub use stream::MuxStream;
+pub use stream::Stream;
 
 use self::{multiplex_state::MultiplexState, pipe_pool::PipePool};
 
@@ -101,9 +101,13 @@ impl Multiplex {
     }
 
     /// Open a reliable conn to the other end.
-    pub async fn open_conn(&self, _additional: &str) -> std::io::Result<Stream> {
+    pub async fn open_conn(&self, additional: &str) -> std::io::Result<Stream> {
         // create a pre-open stream, then wait until the ticking makes it open
-        let stream = self.state.lock().start_open_stream().map_err(to_ioerror)?;
+        let stream = self
+            .state
+            .lock()
+            .start_open_stream(additional)
+            .map_err(to_ioerror)?;
         stream.wait_connected().await?;
         Ok(stream)
     }

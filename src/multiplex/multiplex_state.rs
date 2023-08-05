@@ -61,6 +61,7 @@ impl MultiplexState {
     pub fn tick(&mut self, mut outgoing_callback: impl FnMut(OuterMessage)) -> Instant {
         // encryption
         let mut outgoing_callback = |msg: Message| {
+            log::trace!("send {:?}", msg);
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
                 outgoing_callback(OuterMessage::EncryptedMsg { inner })
@@ -87,12 +88,15 @@ impl MultiplexState {
     }
 
     /// Starts the opening of a connection, returning a Stream in the pending state.
-    pub fn start_open_stream(&mut self) -> anyhow::Result<Stream> {
+    pub fn start_open_stream(&mut self, additional: &str) -> anyhow::Result<Stream> {
         for _ in 0..100 {
             let stream_id: u16 = rand::thread_rng().gen();
             if !self.stream_tab.contains_key(&stream_id) {
-                let (new_stream, handle) =
-                    StreamState::new_pending(self.stream_update.clone(), stream_id);
+                let (new_stream, handle) = StreamState::new_pending(
+                    self.stream_update.clone(),
+                    stream_id,
+                    additional.to_owned(),
+                );
                 self.stream_tab.insert(stream_id, new_stream);
                 return Ok(handle);
             }
@@ -157,12 +161,13 @@ impl MultiplexState {
                 }
                 let inner: Message =
                     stdcode::deserialize(&inner).context("could not deserialize message")?;
+                log::trace!("recv {:?}", inner);
                 match &inner {
                     Message::Rel {
                         kind: RelKind::Syn,
                         stream_id,
                         seqno: _,
-                        payload: _,
+                        payload,
                     } => {
                         if let Some(stream) = self.stream_tab.get_mut(stream_id) {
                             stream.inject_incoming(inner);
@@ -172,6 +177,7 @@ impl MultiplexState {
                             let (mut stream, handle) = StreamState::new_established(
                                 self.stream_update.clone(),
                                 *stream_id,
+                                String::from_utf8_lossy(payload).to_string(),
                             );
                             let stream_id = *stream_id;
                             stream.inject_incoming(inner); // this creates the syn-ack

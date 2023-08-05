@@ -5,10 +5,11 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use recycle_box::{coerce_box, RecycleBox};
 use smol::prelude::*;
+use stdcode::StdcodeSerializeExt;
 
 use std::{
     collections::VecDeque,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     pin::Pin,
     sync::Arc,
     task::Context,
@@ -24,6 +25,9 @@ mod congestion;
 mod inflight;
 
 const MSS: usize = 32768;
+
+#[deprecated]
+pub type MuxStream = Stream;
 
 /// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
 pub struct Stream {
@@ -83,17 +87,19 @@ impl Stream {
 
     /// Shuts down the stream, causing future read and write operations to fail.
     pub async fn shutdown(&mut self) {
-        todo!()
+        self.queues.lock().closed = true;
+        let _ = self.global_notify.try_send(());
+        self.ready.notify_all();
     }
 
     /// Sends an unreliable datagram.
     pub async fn send_urel(&self, dgram: Bytes) -> std::io::Result<()> {
-        todo!()
+        smol::future::pending().await
     }
 
     /// Receives an unreliable datagram.
     pub async fn recv_urel(&self) -> std::io::Result<Bytes> {
-        todo!()
+        smol::future::pending().await
     }
 }
 
@@ -125,7 +131,7 @@ impl AsyncRead for Stream {
                     read_ready
                         .wait_until(move || {
                             let inner = inner.lock();
-                            if !inner.read_stream.is_empty() {
+                            if !inner.read_stream.is_empty() || inner.closed {
                                 Some(())
                             } else {
                                 None
@@ -140,8 +146,10 @@ impl AsyncRead for Stream {
             Poll::Ready(()) => {
                 self.read_ready_resolved = true;
                 self.read_ready_future = Some(read_future);
-                let n = self.queues.lock().read_stream.read(buf);
+                let mut queues = self.queues.lock();
+                let n = queues.read_stream.read(buf);
                 let _ = self.global_notify.try_send(());
+
                 Poll::Ready(n)
             }
             Poll::Pending => {
@@ -164,7 +172,7 @@ impl AsyncWrite for Stream {
         if self.write_ready_resolved {
             let write_ready = self.ready.clone();
             let inner = self.queues.clone();
-            // this waits until there's less than 4xMSS bytes waiting to be written. this produces the right backpressure
+            // this waits until there's less than 1 MB waiting to be written. this produces the right backpressure
             write_future = RecycleBox::into_pin(coerce_box!(RecycleBox::recycle_pinned(
                 write_future,
                 async move {
@@ -213,6 +221,7 @@ impl AsyncWrite for Stream {
 pub(crate) struct StreamState {
     phase: Phase,
     stream_id: u16,
+    additional_data: String,
     incoming_queue: Vec<Message>,
     queues: Arc<Mutex<StreamQueues>>,
     ready: Arc<async_event::Event>,
@@ -231,13 +240,26 @@ pub(crate) struct StreamState {
 
 impl StreamState {
     /// Creates a new StreamState, in the pre-SYN-sent state. Also returns the "user-facing" handle.
-    pub fn new_pending(global_notify: tachyonix::Sender<()>, stream_id: u16) -> (Self, Stream) {
-        Self::new_in_phase(global_notify, stream_id, Phase::Pending)
+    pub fn new_pending(
+        global_notify: tachyonix::Sender<()>,
+        stream_id: u16,
+        additional_data: String,
+    ) -> (Self, Stream) {
+        Self::new_in_phase(global_notify, stream_id, Phase::Pending, additional_data)
     }
 
     /// Creates a new StreamState, in the established state. Also returns the "user-facing" handle.
-    pub fn new_established(global_notify: tachyonix::Sender<()>, stream_id: u16) -> (Self, Stream) {
-        Self::new_in_phase(global_notify, stream_id, Phase::Established)
+    pub fn new_established(
+        global_notify: tachyonix::Sender<()>,
+        stream_id: u16,
+        additional_data: String,
+    ) -> (Self, Stream) {
+        Self::new_in_phase(
+            global_notify,
+            stream_id,
+            Phase::Established,
+            additional_data,
+        )
     }
 
     /// Creates a new StreamState, in the specified state. Also returns the "user-facing" handle.
@@ -245,6 +267,7 @@ impl StreamState {
         global_notify: tachyonix::Sender<()>,
         stream_id: u16,
         phase: Phase,
+        additional_data: String,
     ) -> (Self, Stream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
@@ -264,6 +287,7 @@ impl StreamState {
             retrans_count: 0,
 
             congestion: Highspeed::new(1),
+            additional_data,
         };
         (state, handle)
     }
@@ -286,7 +310,7 @@ impl StreamState {
                     kind: RelKind::Syn,
                     stream_id: self.stream_id,
                     seqno: 0,
-                    payload: Default::default(),
+                    payload: Bytes::copy_from_slice(self.additional_data.as_bytes()),
                 });
                 let next_resend = now + Duration::from_secs(1);
                 self.phase = Phase::SynSent { next_resend };
@@ -313,7 +337,7 @@ impl StreamState {
                         kind: RelKind::Syn,
                         stream_id: self.stream_id,
                         seqno: 0,
-                        payload: Default::default(),
+                        payload: Bytes::copy_from_slice(self.additional_data.as_bytes()),
                     });
                     let next_resend = now + Duration::from_secs(1);
                     self.phase = Phase::SynSent { next_resend };
@@ -351,10 +375,16 @@ impl StreamState {
     }
 
     fn tick_read(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
-        // First, put all incoming packets into the reorderer.
+        // Put all incoming packets into the reorderer.
         let mut gen_ack = false;
         let rto = self.rto();
         for packet in self.incoming_queue.drain(..) {
+            // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
+            // This unifies flow control with congestion control at the cost of a bit of efficiency.
+            if self.queues.lock().read_stream.len() > 1_000_000 {
+                continue;
+            }
+
             match packet {
                 Message::Rel {
                     kind: RelKind::Data,
@@ -409,6 +439,14 @@ impl StreamState {
                         payload,
                     });
                 }
+                Message::Rel {
+                    kind: RelKind::Rst,
+                    stream_id,
+                    seqno,
+                    payload,
+                } => {
+                    self.phase = Phase::Closed;
+                }
                 msg => log::error!("not yet implemented handling for {:?}", msg),
             }
         }
@@ -420,11 +458,12 @@ impl StreamState {
         }
         // Then, generate an ack. This acks every packet up to incoming_nogap_until using the seqno field, which is the bare minimum for correct behavior.
         if gen_ack {
+            let compatibility: Vec<u64> = Vec::new();
             outgoing_callback(Message::Rel {
                 kind: RelKind::DataAck,
                 stream_id: self.stream_id,
                 seqno: self.read_until,
-                payload: Bytes::new(),
+                payload: compatibility.stdcode().into(),
             });
         }
     }
@@ -481,8 +520,9 @@ impl StreamState {
     }
 
     fn retick_time(&self) -> Instant {
-        self.retransmit_time
-            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
+        Instant::now() + Duration::from_millis(10)
+        // self.retransmit_time
+        //     .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
     }
 
     fn rto(&self) -> Duration {
