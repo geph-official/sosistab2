@@ -1,9 +1,7 @@
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ahash::AHashMap;
 use anyhow::Context;
-
-use diatomic_waker::WakeSource;
 
 use rand::Rng;
 use rand_chacha::rand_core::OsRng;
@@ -34,13 +32,13 @@ pub struct MultiplexState {
 
     stream_tab: AHashMap<u16, StreamState>,
     // notify this when the streams need to be rescanned
-    stream_update: WakeSource,
+    stream_update: tachyonix::Sender<()>,
 }
 
 impl MultiplexState {
-    /// Creates a new MultiplexState. "Retick" notifications are sent to the given WakeSource.
+    /// Creates a new MultiplexState. "Retick" notifications are sent to the given tachyonix::Sender<()>.
     pub fn new(
-        stream_update: WakeSource,
+        stream_update: tachyonix::Sender<()>,
         local_lsk: MuxSecret,
         peer_lpk: Option<MuxPublic>,
     ) -> Self {
@@ -59,13 +57,26 @@ impl MultiplexState {
         }
     }
 
+    fn our_clienthello(&self) -> OuterMessage {
+        OuterMessage::ClientHello {
+            long_pk: self.local_lsk.to_public(),
+            eph_pk: (&self.local_esk_send).into(),
+            version: 1,
+            timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
+        }
+    }
+
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
     pub fn tick(&mut self, mut outgoing_callback: impl FnMut(OuterMessage)) -> Instant {
         // encryption
+        let hello = self.our_clienthello();
         let mut outgoing_callback = |msg: Message| {
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
                 outgoing_callback(OuterMessage::EncryptedMsg { inner })
+            } else {
+                log::warn!("no send aead, cannot send anything yet. sending another clienthello");
+                outgoing_callback(hello.clone());
             }
         };
 
@@ -75,6 +86,7 @@ impl MultiplexState {
             .values_mut()
             .map(|stream| stream.tick(&mut outgoing_callback))
             .min();
+
         insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
     }
 
@@ -83,7 +95,8 @@ impl MultiplexState {
         for _ in 0..100 {
             let stream_id: u16 = rand::thread_rng().gen();
             if !self.stream_tab.contains_key(&stream_id) {
-                let (new_stream, handle) = StreamState::new_pending(stream_id);
+                let (new_stream, handle) =
+                    StreamState::new_pending(self.stream_update.clone(), stream_id);
                 self.stream_tab.insert(stream_id, new_stream);
                 return Ok(handle);
             }
@@ -157,15 +170,18 @@ impl MultiplexState {
                     } => {
                         if let Some(stream) = self.stream_tab.get_mut(stream_id) {
                             stream.inject_incoming(inner);
-                            self.stream_update.notify();
+                            let _ = self.stream_update.try_send(());
                         } else {
                             log::trace!("syn recv {} ACCEPT", stream_id);
                             // create a new stream in the right state. we don't need to do anything else
-                            let (mut stream, handle) = StreamState::new_established(*stream_id);
+                            let (mut stream, handle) = StreamState::new_established(
+                                self.stream_update.clone(),
+                                *stream_id,
+                            );
                             let stream_id = *stream_id;
                             stream.inject_incoming(inner); // this creates the syn-ack
                             self.stream_tab.insert(stream_id, stream);
-                            self.stream_update.notify();
+                            let _ = self.stream_update.try_send(());
                             accept_callback(handle);
                         }
                     }

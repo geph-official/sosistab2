@@ -83,9 +83,13 @@ async fn listener_loop(
         rand::thread_rng().fill_bytes(&mut b);
         b
     };
-    log::warn!("sleeping 60 seconds to prevent replays...");
-    smol::Timer::after(Duration::from_secs(60)).await;
-    log::warn!("finished sleeping 60 seconds to prevent replays!");
+
+    if std::env::var("SOSISTAB2_NO_SLEEP").is_err() {
+        log::warn!("sleeping 60 seconds to prevent replays...");
+        smol::Timer::after(Duration::from_secs(60)).await;
+        log::warn!("finished sleeping 60 seconds to prevent replays!");
+    }
+
     loop {
         let mut buf = [0u8; 2048];
         let (n, client_addr) = socket.recv_from(&mut buf).await?;

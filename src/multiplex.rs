@@ -8,7 +8,7 @@ use std::{
 };
 
 use concurrent_queue::ConcurrentQueue;
-use diatomic_waker::WakeSink;
+
 use parking_lot::Mutex;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -41,9 +41,9 @@ fn to_ioerror<T: Into<Box<dyn std::error::Error + Send + Sync>>>(val: T) -> std:
 impl Multiplex {
     /// Creates a new multiplexed Pipe. If `their_long_pk` is given, verify that the other side has the given public key.
     pub fn new(local_sk: MuxSecret, preshared_peer_pk: Option<MuxPublic>) -> Self {
-        let stream_update = WakeSink::new();
+        let (send_stream_update, stream_update) = tachyonix::channel(100000);
         let state = Arc::new(Mutex::new(MultiplexState::new(
-            stream_update.source(),
+            send_stream_update,
             local_sk,
             preshared_peer_pk,
         )));
@@ -121,7 +121,7 @@ impl Multiplex {
 /// The master loop that starts the other loops
 async fn multiplex_loop(
     state: Arc<Mutex<MultiplexState>>,
-    stream_update: WakeSink,
+    stream_update: tachyonix::Receiver<()>,
     pipe_pool: Arc<PipePool>,
     send_accepted: Sender<Stream>,
 ) {
@@ -141,6 +141,7 @@ async fn incoming_loop(
     let mut send_queue = vec![];
     loop {
         let incoming = pipe_pool.recv().await?;
+        log::debug!("incoming {} bytes", incoming.len());
         if let Ok(incoming) = stdcode::deserialize(&incoming) {
             // have the state process the message
             state
@@ -167,29 +168,28 @@ async fn incoming_loop(
 /// Handle "ticking" the streams
 async fn tick_loop(
     state: Arc<Mutex<MultiplexState>>,
-    mut stream_update: WakeSink,
+    mut stream_update: tachyonix::Receiver<()>,
     pipe_pool: Arc<PipePool>,
 ) -> anyhow::Result<()> {
-    const MIN_TICK: Duration = Duration::from_millis(5);
-
     let mut timer = smol::Timer::after(Duration::from_secs(0));
+    let mut next_tick = Instant::now() + Duration::from_secs(86400 * 7);
     let mut send_queue = vec![];
     loop {
-        // tick, and if any messages need to be sent, enqueue them
-        let next_tick = state.lock().tick(|msg| send_queue.push(msg));
-        timer.set_at(next_tick.max(Instant::now() + MIN_TICK));
-
+        next_tick = state.lock().tick(|msg| send_queue.push(msg));
         // transmit all the queue
         for msg in send_queue.drain(..) {
             pipe_pool.send(msg.stdcode().into()).await;
         }
-
-        stream_update
-            .wait_until(|| Some(()))
-            .or(async {
-                (&mut timer).await;
-            })
-            .await;
+        timer.set_at(next_tick);
+        // horrifying hax
+        async {
+            let _ = stream_update.recv().await;
+        }
+        .or(async {
+            (&mut timer).await;
+            log::trace!("timer woken");
+        })
+        .await;
     }
 }
 
