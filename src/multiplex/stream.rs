@@ -1,4 +1,4 @@
-use crate::multiplex::{pipe_pool::Message, stream::congestion::CongestionControl};
+use crate::multiplex::pipe_pool::Message;
 
 use bytes::Bytes;
 
@@ -9,7 +9,7 @@ use stdcode::StdcodeSerializeExt;
 
 use std::{
     collections::VecDeque,
-    io::{ErrorKind, Read, Write},
+    io::{Read, Write},
     pin::Pin,
     sync::Arc,
     task::Context,
@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use self::{congestion::Highspeed, inflight::Inflight};
+use self::{congestion::Cubic, inflight::Inflight};
 
 use super::pipe_pool::{RelKind, Reorderer};
 mod congestion;
@@ -227,13 +227,13 @@ pub(crate) struct StreamState {
     ready: Arc<async_event::Event>,
 
     // read variables
-    read_until: u64,
+    next_unseen_seqno: u64,
     reorderer: Reorderer<Bytes>,
 
     // write variables
     inflight: Inflight,
     next_write_seqno: u64,
-    congestion: Highspeed,
+    congestion: Cubic,
 }
 
 impl StreamState {
@@ -277,12 +277,12 @@ impl StreamState {
             queues,
             ready,
 
-            read_until: 0,
+            next_unseen_seqno: 0,
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
 
-            congestion: Highspeed::new(1),
+            congestion: Cubic::new(0.7, 0.4),
             additional_data,
         };
         (state, handle)
@@ -384,22 +384,22 @@ impl StreamState {
             match packet {
                 Message::Rel {
                     kind: RelKind::Data,
-                    stream_id: _,
+                    stream_id,
                     seqno,
                     payload,
                 } => {
                     gen_ack = true;
-                    log::debug!("incoming seqno {seqno}");
+                    log::debug!("incoming seqno {stream_id}/{seqno}");
                     self.reorderer.insert(seqno, payload);
                 }
                 Message::Rel {
                     kind: RelKind::DataAck,
                     stream_id: _,
-                    seqno: acked_seqno, // *cumulative* ack
+                    seqno: lowest_unseen_seqno, // *one greater* than the last packet that got to the other side
                     payload: _,
                 } => {
-                    // mark every packet whose seqno is leq the given seqno as acked.
-                    for _ in 0..self.inflight.mark_acked_lt(acked_seqno) {
+                    // mark every packet whose seqno is less than the given seqno as acked.
+                    for _ in 0..self.inflight.mark_acked_lt(lowest_unseen_seqno) {
                         self.congestion.mark_ack();
                     }
                 }
@@ -430,7 +430,7 @@ impl StreamState {
         }
         // Then, drain the reorderer
         for (seqno, packet) in self.reorderer.take() {
-            self.read_until = self.read_until.max(seqno);
+            self.next_unseen_seqno = seqno + 1;
             self.queues.lock().read_stream.write_all(&packet).unwrap();
             self.ready.notify_all();
         }
@@ -440,7 +440,7 @@ impl StreamState {
             outgoing_callback(Message::Rel {
                 kind: RelKind::DataAck,
                 stream_id: self.stream_id,
-                seqno: self.read_until,
+                seqno: self.next_unseen_seqno,
                 payload: compatibility.stdcode().into(),
             });
         }

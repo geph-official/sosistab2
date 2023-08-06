@@ -125,9 +125,10 @@ async fn multiplex_loop(
     pipe_pool: Arc<PipePool>,
     send_accepted: Sender<Stream>,
 ) {
-    let ticker = smolscale::spawn(tick_loop(state.clone(), stream_update, pipe_pool.clone()));
-    let incomer = smolscale::spawn(incoming_loop(state, pipe_pool, send_accepted));
-    if let Err(err) = ticker.or(incomer).await {
+    // we don't spawn more things to avoid unnecessary contention over mutexes etc
+    let ticker = tick_loop(state.clone(), stream_update, pipe_pool.clone());
+    let incomer = incoming_loop(state, pipe_pool, send_accepted);
+    if let Err(err) = ticker.race(incomer).await {
         log::error!("BUG: ticker or incomer died: {:?}", err)
     }
 }

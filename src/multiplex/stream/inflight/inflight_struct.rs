@@ -25,7 +25,7 @@ pub struct InflightEntry {
 pub struct Inflight {
     segments: BTreeMap<Seqno, InflightEntry>,
     rtos: BTreeMap<Instant, Vec<Seqno>>,
-    lost_count: usize,
+
     rtt: RttCalculator,
     bw: BwCalculator,
     // max_inversion: Duration,
@@ -40,7 +40,6 @@ impl Inflight {
             rtos: Default::default(),
             rtt: Default::default(),
             bw: Default::default(),
-            lost_count: 0,
             // max_inversion: Duration::from_millis(1),
             // max_acked_sendtime: Instant::now(),
         }
@@ -52,7 +51,7 @@ impl Inflight {
 
     pub fn inflight(&self) -> usize {
         // all segments that are still in flight
-        self.segments.len() - self.lost_count
+        self.segments.len()
     }
 
     pub fn last_minus_first(&self) -> usize {
@@ -68,28 +67,6 @@ impl Inflight {
                 .next()
                 .map(|f| *f.0)
                 .unwrap_or_default()) as usize
-    }
-
-    pub fn lost_count(&self) -> usize {
-        self.lost_count
-    }
-
-    pub fn min_rtt(&self) -> Duration {
-        self.rtt.min_rtt()
-    }
-
-    /// The total bdp of the link, in packets
-    pub fn bdp(&self) -> usize {
-        (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
-    }
-
-    /// The bandwidth of the link, in RTT/sec
-    pub fn delivery_rate(&self) -> f64 {
-        self.bw.delivery_rate()
-    }
-
-    pub fn rto(&self) -> Duration {
-        self.rtt.rto()
     }
 
     /// Mark all inflight packets less than a certain sequence number as acknowledged.
@@ -124,9 +101,7 @@ impl Inflight {
             self.bw.on_ack(acked_seg.delivered, acked_seg.send_time);
             // remove from rtos
             self.remove_rto(acked_seg.retrans_time, acked_seqno);
-            if acked_seg.known_lost {
-                self.lost_count -= 1;
-            }
+
             // // mark as lost everything below
             // let mark_as_lost: Vec<u64> = self
             //     .segments
@@ -165,11 +140,7 @@ impl Inflight {
             let was_lost = std::mem::replace(&mut seg.known_lost, true);
             let retrans_time = seg.retrans_time;
             self.remove_rto(retrans_time, seqno);
-            if !was_lost {
-                self.lost_count += 1;
-            } else {
-                // eprintln!("WAS ALREADY LOST");
-            }
+
             true
         } else {
             false
@@ -226,7 +197,7 @@ impl Inflight {
         // eprintln!("retransmit {}", seqno);
         self.remove_rto(old_retrans, seqno);
         self.rtos.entry(new_retrans).or_default().push(seqno);
-        self.lost_count -= 1;
+
         Some(payload)
     }
 
