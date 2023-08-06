@@ -11,8 +11,8 @@ use super::calc::{BwCalculator, RttCalculator};
 pub struct InflightEntry {
     seqno: Seqno,
     send_time: Instant,
-    pub retrans: u64,
-    pub payload: Message,
+    retrans: u64,
+    payload: Message,
 
     retrans_time: Instant,
     delivered: u64,
@@ -177,7 +177,8 @@ impl Inflight {
     }
 
     /// Inserts a packet to the inflight.
-    pub fn insert(&mut self, seqno: Seqno, msg: Message) {
+    pub fn insert(&mut self, msg: Message) {
+        let seqno = msg.seqno();
         let now = Instant::now();
         let rto_duration = self.rtt.rto();
         let rto = now + rto_duration;
@@ -206,6 +207,7 @@ impl Inflight {
             .next()
             .map(|(instant, seqno)| (seqno[0], *instant))
     }
+
     /// Retransmits a particular seqno, clearing the "known lost" flag on the way.
     pub fn retransmit(&mut self, seqno: Seqno) -> Option<Message> {
         let rto = self.rtt.rto();

@@ -17,14 +17,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use self::congestion::Highspeed;
+use self::{congestion::Highspeed, inflight::Inflight};
 
 use super::pipe_pool::{RelKind, Reorderer};
 mod congestion;
 
 mod inflight;
 
-const MSS: usize = 32768;
+const MSS: usize = 1000;
 
 #[deprecated]
 pub type MuxStream = Stream;
@@ -231,9 +231,7 @@ pub(crate) struct StreamState {
     reorderer: Reorderer<Bytes>,
 
     // write variables
-    inflight: VecDeque<Message>,
-    retransmit_time: Option<Instant>,
-    retrans_count: u32,
+    inflight: Inflight,
     next_write_seqno: u64,
     congestion: Highspeed,
 }
@@ -281,10 +279,8 @@ impl StreamState {
 
             read_until: 0,
             reorderer: Reorderer::default(),
-            inflight: VecDeque::new(),
-            retransmit_time: None,
+            inflight: Inflight::new(),
             next_write_seqno: 0,
-            retrans_count: 0,
 
             congestion: Highspeed::new(1),
             additional_data,
@@ -377,7 +373,7 @@ impl StreamState {
     fn tick_read(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // Put all incoming packets into the reorderer.
         let mut gen_ack = false;
-        let rto = self.rto();
+
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
             // This unifies flow control with congestion control at the cost of a bit of efficiency.
@@ -403,26 +399,8 @@ impl StreamState {
                     payload: _,
                 } => {
                     // mark every packet whose seqno is leq the given seqno as acked.
-                    while let Some(first) = self.inflight.pop_front() {
-                        log::trace!(
-                            "received ack up to {acked_seqno}, considering our {}",
-                            first.seqno()
-                        );
-
-                        if first.seqno() > acked_seqno {
-                            self.inflight.push_front(first);
-
-                            break;
-                        } else {
-                            self.retransmit_time = Some(now + rto);
-                            self.congestion.mark_ack();
-
-                            log::debug!("{} is now acked", first.seqno());
-                        }
-                    }
-
-                    if self.inflight.is_empty() {
-                        self.retransmit_time = None;
+                    for _ in 0..self.inflight.mark_acked_lt(acked_seqno) {
+                        self.congestion.mark_ack();
                     }
                 }
                 Message::Rel {
@@ -472,7 +450,7 @@ impl StreamState {
         // first, we attempt to fill the congestion window as far as possible.
         // every time we add another segment, we also transmit it, and set the RTO.
         let cwnd = self.congestion.cwnd();
-        while self.inflight.len() < cwnd {
+        while self.inflight.last_minus_first() < cwnd {
             let mut queues = self.queues.lock();
             if queues.write_stream.is_empty() {
                 queues.write_stream.shrink_to_fit();
@@ -490,43 +468,40 @@ impl StreamState {
                 seqno,
                 payload: buffer.into(),
             };
-            self.inflight.push_back(msg.clone());
+            self.inflight.insert(msg.clone());
             outgoing_callback(msg);
-            if self.retransmit_time.is_none() {
-                self.retransmit_time = Some(now + Duration::from_secs(1))
-            }
+
             self.ready.notify_all();
 
-            log::debug!("filled {}/{} of cwnd", self.inflight.len(), cwnd);
+            log::debug!(
+                "filled {}/{} of cwnd",
+                self.inflight.last_minus_first(),
+                cwnd
+            );
         }
 
         // then, we do any retransmissions if necessary
-        if let Some(retrans_time) = self.retransmit_time {
-            let rto = self.rto();
+        while let Some((seqno, retrans_time)) = self.inflight.first_rto() {
             if now >= retrans_time {
-                if self.congestion.cwnd() >= self.inflight.len() {
+                if self.congestion.cwnd() >= self.inflight.last_minus_first() {
                     self.congestion.mark_loss();
                 }
-                let first = self
-                    .inflight
-                    .front()
-                    .expect("RTO expired but nothing in flight");
-                log::debug!("RTO retransmit {}", first.seqno());
-                outgoing_callback(first.clone());
-                self.retrans_count += 1;
-                self.retransmit_time = Some(now + rto * 2u32.pow(self.retrans_count))
+
+                log::debug!("RTO retransmit {}", seqno);
+                let first = self.inflight.retransmit(seqno).expect("no first");
+                outgoing_callback(first);
+            } else {
+                break;
             }
         }
     }
 
     fn retick_time(&self) -> Instant {
-        Instant::now() + Duration::from_millis(10)
-        // self.retransmit_time
-        //     .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
-    }
-
-    fn rto(&self) -> Duration {
-        Duration::from_millis(1000)
+        // Instant::now() + Duration::from_millis(10)
+        self.inflight
+            .first_rto()
+            .map(|s| s.1)
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
     }
 }
 
