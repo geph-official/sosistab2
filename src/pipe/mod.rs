@@ -15,7 +15,7 @@ pub trait Pipe: Send + Sync + 'static {
     /// Sends a datagram to the other side. Should never block; if the datagram cannot be sent quickly it should simply be dropped.
     ///
     /// Datagrams of at least 65535 bytes must be accepted, but larger datagrams might not be.
-    async fn send(&self, to_send: Bytes);
+    fn send(&self, to_send: Bytes);
 
     /// Receives the next datagram from the other side. If the pipe has failed, this must return an error promptly.
     async fn recv(&self) -> std::io::Result<Bytes>;
@@ -32,8 +32,8 @@ pub trait Pipe: Send + Sync + 'static {
 
 #[async_trait]
 impl<P: Pipe + ?Sized, T: Deref<Target = P> + Send + Sync + 'static> Pipe for T {
-    async fn send(&self, to_send: Bytes) {
-        self.deref().send(to_send).await
+    fn send(&self, to_send: Bytes) {
+        self.deref().send(to_send)
     }
 
     async fn recv(&self) -> std::io::Result<Bytes> {

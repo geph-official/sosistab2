@@ -7,7 +7,6 @@ pub struct Cubic {
     cee: f64,
     last_loss: Option<Instant>,
     cwnd_max: f64,
-    bdp: f64,
 }
 
 impl Cubic {
@@ -18,8 +17,7 @@ impl Cubic {
             beta,
             cee,
             last_loss: None,
-            cwnd_max: 1000.0,
-            bdp: 0.0,
+            cwnd_max: 10000.0,
         }
     }
 

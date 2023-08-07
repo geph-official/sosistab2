@@ -112,8 +112,8 @@ impl ObfsUdpPipe {
         remote_addr: SocketAddr,
         peer_metadata: &str,
     ) -> Self {
-        let (send_upraw, recv_upraw) = smol::channel::bounded(100);
-        let (send_downraw, recv_downraw) = smol::channel::bounded(100);
+        let (send_upraw, recv_upraw) = smol::channel::bounded(1000);
+        let (send_downraw, recv_downraw) = smol::channel::bounded(1000);
         let stats_calculator = Arc::new(Mutex::new(StatsCalculator::new()));
 
         let pipe_loop_future = pipe_loop(
@@ -285,8 +285,8 @@ async fn client_loop(
 
 #[async_trait]
 impl Pipe for ObfsUdpPipe {
-    async fn send(&self, to_send: Bytes) {
-        let _ = self.send_upraw.send(to_send).await;
+    fn send(&self, to_send: Bytes) {
+        let _ = self.send_upraw.try_send(to_send);
     }
 
     async fn recv(&self) -> std::io::Result<Bytes> {

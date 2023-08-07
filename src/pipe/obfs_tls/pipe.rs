@@ -88,7 +88,7 @@ async fn send_loop(
 
 #[async_trait]
 impl Pipe for ObfsTlsPipe {
-    async fn send(&self, to_send: Bytes) {
+    fn send(&self, to_send: Bytes) {
         // TODO reuse memory of to_send
         for chunk in to_send.chunks(60000) {
             let _ = self

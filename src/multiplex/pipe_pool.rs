@@ -171,7 +171,7 @@ impl SinglePipe {
                     .or(async move {
                         for ctr in 0u128.. {
                             log::debug!("******* ping {ctr}");
-                            pipe.send(Bytes::from_static(b"!!ping!!")).await;
+                            pipe.send(Bytes::from_static(b"!!ping!!"));
                             smol::Timer::after(Duration::from_secs(1)).await;
                         }
                         unreachable!()
@@ -299,7 +299,7 @@ impl PipePool {
         // That pipe is *probably* alive, and if not the client will be opening a new one soon.
         if self.naive_send {
             if let Some(pipe) = self.last_recv_pipe() {
-                pipe.send(pkt).await;
+                pipe.send(pkt);
                 return;
             }
         }
@@ -311,7 +311,7 @@ impl PipePool {
             .map(|(k, v)| (k.clone(), *v));
         if let Some((last, time)) = bb {
             if time.elapsed() < Duration::from_millis(200) {
-                last.send(pkt).await;
+                last.send(pkt);
                 return;
             }
         }
@@ -339,7 +339,7 @@ impl PipePool {
                 best_pipe.peer_addr(),
                 best_pipe.protocol()
             );
-            best_pipe.send(pkt).await;
+            best_pipe.send(pkt);
 
             *self.last_send_pipe.lock() = Some((best_pipe.clone(), Instant::now()))
         }
@@ -364,7 +364,7 @@ async fn pipe_associated_task(
             if pkt[..] == b"!!ping!!"[..] {
                 // in this case, we just reflect back a pong
 
-                pipe.send(Bytes::from_static(b"!!pong!!")).await;
+                pipe.send(Bytes::from_static(b"!!pong!!"));
             } else if pkt[..] == b"!!pong!!"[..] {
                 ping_notify.notify(1);
             } else {

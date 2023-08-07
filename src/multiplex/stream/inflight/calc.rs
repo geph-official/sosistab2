@@ -37,19 +37,6 @@ impl RttCalculator {
     pub fn rto(&self) -> Duration {
         Duration::from_secs_f64(self.inner.inverse_cdf(0.99) + 0.25)
     }
-
-    // pub fn srtt(&self) -> Duration {
-    //     Duration::from_secs_f64(self.inner.mean())
-    // }
-
-    pub fn rtt_var(&self) -> Duration {
-        Duration::from_secs_f64(self.inner.inverse_cdf(0.99) - self.inner.inverse_cdf(0.01) + 0.05)
-        // 50ms timer inaccuracy
-    }
-
-    pub fn min_rtt(&self) -> Duration {
-        self.min_rtt
-    }
 }
 
 pub struct BwCalculator {

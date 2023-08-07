@@ -161,9 +161,10 @@ async fn listener_loop(
                             } => {
                                 let fallible = async {
                                     let token_info = TokenInfo::decrypt(&token_key, &resume_token)?;
-                                    let (send_upcoded, recv_upcoded) = smol::channel::bounded(100);
+                                    let (send_upcoded, recv_upcoded) =
+                                        smol::channel::bounded(10000);
                                     let (send_downcoded, recv_downcoded) =
-                                        smol::channel::bounded(100);
+                                        smol::channel::bounded(10000);
                                     // mix the metadata with the session key
                                     let real_session_key = blake3::keyed_hash(
                                         blake3::hash(metadata.as_bytes()).as_bytes(),
