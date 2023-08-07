@@ -44,7 +44,6 @@ impl StatsCalculator {
 
     /// Calculates stats based on recent data.
     pub fn get_stats(&self) -> PipeStats {
-        log::debug!("calculating stats ");
         let loss_total = self.lost.max(1) as f64 / (self.acked + self.lost).max(1) as f64;
         let loss_qualified = self.lost_qualified.max(1) as f64
             / (self.acked_qualified + self.lost_qualified).max(1) as f64;

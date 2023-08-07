@@ -85,11 +85,12 @@ itertools = "0.10.5"
 moka = "0.9"
 
 replay_filter = {version = "0.1", path="lib/replay_filter"}
-ahash = "0.8.3"
+ahash = {version="0.8.3", features=["serde"]}
 tachyonix = "0.2.1"
 async-event = "0.1.0"
 diatomic-waker = "0.1.0"
 recycle-box = "0.2.0"
+futures-intrusive = "0.5.0"
 
 
 [profile.dev]

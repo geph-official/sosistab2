@@ -28,6 +28,9 @@ pub struct Inflight {
 
     rtt: RttCalculator,
     bw: BwCalculator,
+
+    sent: u64,
+    retrans: u64,
     // max_inversion: Duration,
     // max_acked_sendtime: Instant,
 }
@@ -40,6 +43,9 @@ impl Inflight {
             rtos: Default::default(),
             rtt: Default::default(),
             bw: Default::default(),
+
+            sent: 0,
+            retrans: 0,
             // max_inversion: Duration::from_millis(1),
             // max_acked_sendtime: Instant::now(),
         }
@@ -102,45 +108,6 @@ impl Inflight {
             // remove from rtos
             self.remove_rto(acked_seg.retrans_time, acked_seqno);
 
-            // // mark as lost everything below
-            // let mark_as_lost: Vec<u64> = self
-            //     .segments
-            //     .keys()
-            //     .take_while(|f| **f < acked_seqno)
-            //     .copied()
-            //     .collect();
-            // let now = Instant::now();
-            // for seqno in mark_as_lost {
-            //     let seg = self.segments.get_mut(&seqno).unwrap();
-            //     // if send time was in the past far enough, retransmit
-            //     if seg.retrans == 0
-            //         && seg.retrans_time < acked_seg.retrans_time
-            //         && seg.retrans_time > now
-            //     {
-            //         log::debug!(
-            //             "EARLY retransmit for lost segment {} due to ack of {} (var {:?})",
-            //             seqno,
-            //             acked_seqno,
-            //             self.rtt.rtt_var()
-            //         );
-            //         let old_retrans_time = std::mem::replace(&mut seg.retrans_time, now);
-            //         self.remove_rto(old_retrans_time, seqno);
-            //         self.rtos.entry(now).or_default().push(seqno);
-            //     }
-            // }
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Marks a particular packet as known to be lost. Does not immediately retransmit it yet!
-    pub fn mark_lost(&mut self, seqno: Seqno) -> bool {
-        if let Some(seg) = self.segments.get_mut(&seqno) {
-            let was_lost = std::mem::replace(&mut seg.known_lost, true);
-            let retrans_time = seg.retrans_time;
-            self.remove_rto(retrans_time, seqno);
-
             true
         } else {
             false
@@ -169,6 +136,7 @@ impl Inflight {
         assert!(prev.is_none());
         // we insert into RTOs.
         self.rtos.entry(rto).or_default().push(seqno);
+        self.sent += 1;
     }
 
     /// Returns the retransmission time of the first possibly retransmitted packet, as well as its seqno. This skips all known-lost packets.
@@ -197,8 +165,28 @@ impl Inflight {
         // eprintln!("retransmit {}", seqno);
         self.remove_rto(old_retrans, seqno);
         self.rtos.entry(new_retrans).or_default().push(seqno);
-
+        self.sent += 1;
+        self.retrans += 1;
+        log::debug!(
+            "retransmission {:.2}% ({}/{})",
+            (self.retrans as f64) / (self.sent as f64) * 100.0,
+            self.retrans,
+            self.sent
+        );
         Some(payload)
+    }
+
+    /// Marks a particular packet as known to be lost. Does not immediately retransmit it yet!
+    pub fn mark_lost(&mut self, seqno: Seqno) -> bool {
+        if let Some(seg) = self.segments.get_mut(&seqno) {
+            seg.known_lost = true;
+            let retrans_time = seg.retrans_time;
+            self.remove_rto(retrans_time, seqno);
+
+            true
+        } else {
+            false
+        }
     }
 
     fn remove_rto(&mut self, retrans_time: Instant, seqno: Seqno) {
@@ -209,5 +197,19 @@ impl Inflight {
                 o.remove();
             }
         }
+    }
+
+    pub fn min_rtt(&self) -> Duration {
+        self.rtt.min_rtt()
+    }
+
+    /// The total bdp of the link, in packets
+    pub fn bdp(&self) -> usize {
+        (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
+    }
+
+    /// The bandwidth of the link, in RTT/sec
+    pub fn delivery_rate(&self) -> f64 {
+        self.bw.delivery_rate()
     }
 }

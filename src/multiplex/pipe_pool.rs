@@ -99,16 +99,21 @@ impl<T: Clone> Default for Reorderer<T> {
     }
 }
 impl<T: Clone> Reorderer<T> {
+    /// Iterates over all the sequence numbers in the reorder
+    pub fn seqnos(&self) -> impl Iterator<Item = u64> + '_ {
+        self.pkts.keys().copied()
+    }
+
     /// Inserts an item into the reorderer. Returns true iff the item is accepted or has been accepted in the past.
     pub fn insert(&mut self, seq: u64, item: T) -> bool {
         log::trace!("reorder seq={}, min={}", seq, self.min);
         if seq >= self.min && seq <= self.min + 20000 {
             if self.pkts.insert(seq, item).is_some() {
-                log::debug!("spurious retransmission of {} received", seq);
+                log::debug!("spurious in pending of {} received", seq);
             }
             true
         } else {
-            log::debug!("out of order (seq={}, min={})", seq, self.min);
+            log::debug!("spurious in past of (seq={}, min={})", seq, self.min);
             // if less than min, we still accept
             seq < self.min
         }

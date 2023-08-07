@@ -3,9 +3,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use anyhow::Context;
 
+use futures_intrusive::sync::ManualResetEvent;
 use rand::Rng;
 use rand_chacha::rand_core::OsRng;
 use replay_filter::ReplayFilter;
+use std::sync::Arc;
 use stdcode::StdcodeSerializeExt;
 
 use crate::{
@@ -32,13 +34,13 @@ pub struct MultiplexState {
 
     stream_tab: AHashMap<u16, StreamState>,
     // notify this when the streams need to be rescanned
-    stream_update: tachyonix::Sender<()>,
+    stream_update: Arc<ManualResetEvent>,
 }
 
 impl MultiplexState {
-    /// Creates a new MultiplexState. "Retick" notifications are sent to the given tachyonix::Sender<()>.
+    /// Creates a new MultiplexState. "Retick" notifications are sent to the given Arc<ManualResetEvent>.
     pub fn new(
-        stream_update: tachyonix::Sender<()>,
+        stream_update: Arc<ManualResetEvent>,
         local_lsk: MuxSecret,
         peer_lpk: Option<MuxPublic>,
     ) -> Self {
@@ -171,7 +173,7 @@ impl MultiplexState {
                     } => {
                         if let Some(stream) = self.stream_tab.get_mut(stream_id) {
                             stream.inject_incoming(inner);
-                            let _ = self.stream_update.try_send(());
+                            self.stream_update.set();
                         } else {
                             // create a new stream in the right state. we don't need to do anything else
                             let (mut stream, handle) = StreamState::new_established(
@@ -182,7 +184,7 @@ impl MultiplexState {
                             let stream_id = *stream_id;
                             stream.inject_incoming(inner); // this creates the syn-ack
                             self.stream_tab.insert(stream_id, stream);
-                            let _ = self.stream_update.try_send(());
+                            self.stream_update.set();
                             accept_callback(handle);
                         }
                     }
@@ -201,7 +203,7 @@ impl MultiplexState {
                             .get_mut(stream_id)
                             .context("urel with unknown stream id")?;
                         stream.inject_incoming(inner);
-                        let _ = self.stream_update.try_send(());
+                        self.stream_update.set();
                     }
 
                     Message::Empty => {}

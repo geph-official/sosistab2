@@ -1,10 +1,15 @@
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
-use std::{any::Any, sync::Arc, time::Duration};
+use std::{
+    any::Any,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use concurrent_queue::ConcurrentQueue;
 
+use futures_intrusive::sync::ManualResetEvent;
 use parking_lot::Mutex;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -37,9 +42,9 @@ fn to_ioerror<T: Into<Box<dyn std::error::Error + Send + Sync>>>(val: T) -> std:
 impl Multiplex {
     /// Creates a new multiplexed Pipe. If `their_long_pk` is given, verify that the other side has the given public key.
     pub fn new(local_sk: MuxSecret, preshared_peer_pk: Option<MuxPublic>) -> Self {
-        let (send_stream_update, stream_update) = tachyonix::channel(100000);
+        let stream_update = Arc::new(ManualResetEvent::new(false));
         let state = Arc::new(Mutex::new(MultiplexState::new(
-            send_stream_update,
+            stream_update.clone(),
             local_sk,
             preshared_peer_pk,
         )));
@@ -121,7 +126,7 @@ impl Multiplex {
 /// The master loop that starts the other loops
 async fn multiplex_loop(
     state: Arc<Mutex<MultiplexState>>,
-    stream_update: tachyonix::Receiver<()>,
+    stream_update: Arc<ManualResetEvent>,
     pipe_pool: Arc<PipePool>,
     send_accepted: Sender<Stream>,
 ) {
@@ -169,7 +174,7 @@ async fn incoming_loop(
 /// Handle "ticking" the streams
 async fn tick_loop(
     state: Arc<Mutex<MultiplexState>>,
-    mut stream_update: tachyonix::Receiver<()>,
+    stream_update: Arc<ManualResetEvent>,
     pipe_pool: Arc<PipePool>,
 ) -> anyhow::Result<()> {
     let mut timer = smol::Timer::after(Duration::from_secs(0));
@@ -181,10 +186,15 @@ async fn tick_loop(
         for msg in send_queue.drain(..) {
             pipe_pool.send(msg.stdcode().into()).await;
         }
+        // sleep 1ms first to prevent too aggressively looping around
+        // this is also the basis for the brand of delayed-ack handling we do
+        timer.set_at(Instant::now() + Duration::from_millis(1));
+        (&mut timer).await;
         timer.set_at(next_tick);
         // horrifying hax
         async {
-            let _ = stream_update.recv().await;
+            stream_update.wait().await;
+            stream_update.reset();
             log::trace!("update woken");
         }
         .or(async {

@@ -1,53 +1,41 @@
 use std::time::Instant;
 
-/// CUBIC-style congestion control
-pub struct Cubic {
+/// HSTCP-style congestion control, with a Westwood-style modification.
+pub struct Highspeed {
     cwnd: f64,
-    beta: f64,
-    cee: f64,
-    last_loss: Option<Instant>,
-    cwnd_max: f64,
+    multiplier: usize,
+    bdp: usize,
+    last_loss: Instant,
 }
 
-impl Cubic {
-    /// Creates a new Cubic instance
-    pub fn new(beta: f64, cee: f64) -> Self {
+impl Highspeed {
+    /// Creates a new HSTCP instance with the given increment.
+    pub fn new(multiplier: usize) -> Self {
         Self {
             cwnd: 1.0,
-            beta,
-            cee,
-            last_loss: None,
-            cwnd_max: 10000.0,
-        }
-    }
-
-    fn recalculate_cwnd(&mut self) {
-        if let Some(last_loss) = self.last_loss {
-            let kay = (self.cwnd_max * (1.0 - self.beta) / self.cee).powf(0.3333);
-            self.cwnd = (self.cee * (last_loss.elapsed().as_secs_f64() - kay).powi(3)
-                + self.cwnd_max)
-                .max(1.0);
+            multiplier,
+            last_loss: Instant::now(),
+            bdp: 0,
         }
     }
 
     pub fn cwnd(&self) -> usize {
-        (self.cwnd) as usize
+        self.cwnd as usize
     }
 
-    pub fn mark_ack(&mut self) {
+    pub fn mark_ack(&mut self, current_bdp: usize) {
+        // let multiplier = self.last_loss.elapsed().as_secs_f64().max(1.0).min(32.0);
         // log::debug!("ack => {:.2}", self.cwnd);
-        // if no last_loss, just exponentially increase
-        let max_cwnd = self.cwnd + (1.0f64).min(32.0 / self.cwnd);
-        self.cwnd = max_cwnd;
-        // recalculate; if there's a last loss this will fix things
-        self.recalculate_cwnd();
-        self.cwnd = self.cwnd.min(max_cwnd);
+        self.bdp = current_bdp;
+        self.cwnd += self.multiplier as f64 * (self.cwnd.powf(0.4)).max(1.0) / self.cwnd;
+        // log::debug!("ack {}", self.cwnd);
     }
 
     pub fn mark_loss(&mut self) {
-        log::debug!("loss!!!!!!!!!!!!!!! => {:.2}", self.cwnd());
-        self.last_loss = Some(Instant::now());
-        self.cwnd_max = self.cwnd;
-        self.recalculate_cwnd()
+        self.cwnd = (self.cwnd * 0.5)
+            .max(1.0)
+            .max(self.bdp as f64 * 0.8)
+            .min(self.cwnd);
+        self.last_loss = Instant::now();
     }
 }

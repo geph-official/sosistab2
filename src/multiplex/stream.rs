@@ -2,6 +2,7 @@ use crate::multiplex::pipe_pool::Message;
 
 use bytes::Bytes;
 
+use futures_intrusive::sync::ManualResetEvent;
 use parking_lot::Mutex;
 use recycle_box::{coerce_box, RecycleBox};
 use smol::prelude::*;
@@ -17,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use self::{congestion::Cubic, inflight::Inflight};
+use self::{congestion::Highspeed, inflight::Inflight};
 
 use super::pipe_pool::{RelKind, Reorderer};
 mod congestion;
@@ -31,7 +32,7 @@ pub type MuxStream = Stream;
 
 /// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
 pub struct Stream {
-    global_notify: tachyonix::Sender<()>,
+    global_notify: Arc<ManualResetEvent>,
     read_ready_future: Option<Pin<RecycleBox<dyn Future<Output = ()> + Send + 'static>>>,
     read_ready_resolved: bool,
     write_ready_future: Option<Pin<RecycleBox<dyn Future<Output = ()> + Send + 'static>>>,
@@ -45,7 +46,7 @@ unsafe impl Sync for Stream {}
 
 impl Stream {
     fn new(
-        global_notify: tachyonix::Sender<()>,
+        global_notify: Arc<ManualResetEvent>,
         ready: Arc<async_event::Event>,
         queues: Arc<Mutex<StreamQueues>>,
     ) -> Self {
@@ -88,7 +89,7 @@ impl Stream {
     /// Shuts down the stream, causing future read and write operations to fail.
     pub async fn shutdown(&mut self) {
         self.queues.lock().closed = true;
-        let _ = self.global_notify.try_send(());
+        self.global_notify.set();
         self.ready.notify_all();
     }
 
@@ -148,7 +149,7 @@ impl AsyncRead for Stream {
                 self.read_ready_future = Some(read_future);
                 let mut queues = self.queues.lock();
                 let n = queues.read_stream.read(buf);
-                let _ = self.global_notify.try_send(());
+                self.global_notify.set();
 
                 Poll::Ready(n)
             }
@@ -196,7 +197,7 @@ impl AsyncWrite for Stream {
                 self.write_ready_resolved = true;
                 self.write_ready_future = Some(write_future);
                 let n = self.queues.lock().write_stream.write(buf);
-                let _ = self.global_notify.try_send(());
+                self.global_notify.set();
                 Poll::Ready(n)
             }
             Poll::Pending => {
@@ -209,7 +210,7 @@ impl AsyncWrite for Stream {
 
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         self.queues.lock().closed = true;
-        let _ = self.global_notify.try_send(());
+        self.global_notify.set();
         Poll::Ready(Ok(()))
     }
 
@@ -233,13 +234,14 @@ pub(crate) struct StreamState {
     // write variables
     inflight: Inflight,
     next_write_seqno: u64,
-    congestion: Cubic,
+    congestion: Highspeed,
+    last_retrans: Instant,
 }
 
 impl StreamState {
     /// Creates a new StreamState, in the pre-SYN-sent state. Also returns the "user-facing" handle.
     pub fn new_pending(
-        global_notify: tachyonix::Sender<()>,
+        global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
     ) -> (Self, Stream) {
@@ -248,7 +250,7 @@ impl StreamState {
 
     /// Creates a new StreamState, in the established state. Also returns the "user-facing" handle.
     pub fn new_established(
-        global_notify: tachyonix::Sender<()>,
+        global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
     ) -> (Self, Stream) {
@@ -262,7 +264,7 @@ impl StreamState {
 
     /// Creates a new StreamState, in the specified state. Also returns the "user-facing" handle.
     fn new_in_phase(
-        global_notify: tachyonix::Sender<()>,
+        global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         phase: Phase,
         additional_data: String,
@@ -282,8 +284,9 @@ impl StreamState {
             inflight: Inflight::new(),
             next_write_seqno: 0,
 
-            congestion: Cubic::new(0.7, 0.4),
+            congestion: Highspeed::new(1),
             additional_data,
+            last_retrans: Instant::now(),
         };
         (state, handle)
     }
@@ -372,7 +375,7 @@ impl StreamState {
 
     fn tick_read(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // Put all incoming packets into the reorderer.
-        let mut gen_ack = false;
+        let mut to_ack = vec![];
 
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
@@ -388,19 +391,26 @@ impl StreamState {
                     seqno,
                     payload,
                 } => {
-                    gen_ack = true;
-                    log::debug!("incoming seqno {stream_id}/{seqno}");
-                    self.reorderer.insert(seqno, payload);
+                    log::trace!("incoming seqno {stream_id}/{seqno}");
+                    if self.reorderer.insert(seqno, payload) {
+                        to_ack.push(seqno);
+                    }
                 }
                 Message::Rel {
                     kind: RelKind::DataAck,
                     stream_id: _,
                     seqno: lowest_unseen_seqno, // *one greater* than the last packet that got to the other side
-                    payload: _,
+                    payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     for _ in 0..self.inflight.mark_acked_lt(lowest_unseen_seqno) {
-                        self.congestion.mark_ack();
+                        self.congestion.mark_ack(self.inflight.bdp());
+                    }
+                    // then, we interpret the payload as a vector of acks that should additional be taken care of.
+                    if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
+                        for sack in sacks {
+                            self.inflight.mark_acked(sack);
+                        }
                     }
                 }
                 Message::Rel {
@@ -434,14 +444,14 @@ impl StreamState {
             self.queues.lock().read_stream.write_all(&packet).unwrap();
             self.ready.notify_all();
         }
-        // Then, generate an ack. This acks every packet up to incoming_nogap_until using the seqno field, which is the bare minimum for correct behavior.
-        if gen_ack {
-            let compatibility: Vec<u64> = Vec::new();
+        // Then, generate an ack.
+        if !to_ack.is_empty() {
+            to_ack.retain(|a| a >= &self.next_unseen_seqno);
             outgoing_callback(Message::Rel {
                 kind: RelKind::DataAck,
                 stream_id: self.stream_id,
                 seqno: self.next_unseen_seqno,
-                payload: compatibility.stdcode().into(),
+                payload: to_ack.stdcode().into(),
             });
         }
     }
@@ -450,7 +460,7 @@ impl StreamState {
         // first, we attempt to fill the congestion window as far as possible.
         // every time we add another segment, we also transmit it, and set the RTO.
         let cwnd = self.congestion.cwnd();
-        while self.inflight.last_minus_first() < cwnd {
+        while self.inflight.inflight() < cwnd {
             let mut queues = self.queues.lock();
             if queues.write_stream.is_empty() {
                 queues.write_stream.shrink_to_fit();
@@ -473,23 +483,29 @@ impl StreamState {
 
             self.ready.notify_all();
 
-            log::debug!(
-                "filled {}/{} of cwnd",
-                self.inflight.last_minus_first(),
-                cwnd
-            );
+            log::trace!("filled {}/{} of cwnd", self.inflight.inflight(), cwnd);
         }
 
         // then, we do any retransmissions if necessary
         while let Some((seqno, retrans_time)) = self.inflight.first_rto() {
+            let cwnd = self.congestion.cwnd();
+            let inflight = self.inflight.inflight();
             if now >= retrans_time {
-                if self.congestion.cwnd() >= self.inflight.last_minus_first() {
+                if cwnd >= inflight {
                     self.congestion.mark_loss();
                 }
 
-                log::debug!("RTO retransmit {}", seqno);
-                let first = self.inflight.retransmit(seqno).expect("no first");
-                outgoing_callback(first);
+                // we rate-limit retransmissions.
+                // this is a quick and dirty way of preventing retransmissions themselves from overwhelming the network right when the pipe is full
+                if now.saturating_duration_since(self.last_retrans).as_millis() > 10 {
+                    log::debug!("after loss: {inflight}/{cwnd} of cwnd");
+                    log::debug!("RTO retransmit {}", seqno);
+                    let first = self.inflight.retransmit(seqno).expect("no first");
+                    outgoing_callback(first);
+                    self.last_retrans = now;
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
