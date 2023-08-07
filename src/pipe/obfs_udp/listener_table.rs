@@ -1,7 +1,6 @@
 use anyhow::Context;
 
-
-use parking_lot::{RwLock};
+use parking_lot::RwLock;
 use smol::channel::{Receiver, Sender};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
@@ -24,8 +23,6 @@ pub struct PipeTable {
 struct PipeBack {
     send_downcoded: Sender<ObfsUdpFrame>,
     decrypter: ObfsDecrypter,
-    encrypter: ObfsEncrypter,
-    recv_upcoded: Receiver<ObfsUdpFrame>,
 
     _task: Arc<smol::Task<anyhow::Result<()>>>,
 }
@@ -56,15 +53,13 @@ impl PipeTable {
             self.table.clone(),
             self.socket.clone(),
             client_addr,
-            encrypter.clone(),
-            recv_upcoded.clone(),
+            encrypter,
+            recv_upcoded,
         ));
 
         let pipe_back = PipeBack {
             send_downcoded,
             decrypter,
-            encrypter,
-            recv_upcoded,
 
             _task: Arc::new(task),
         };

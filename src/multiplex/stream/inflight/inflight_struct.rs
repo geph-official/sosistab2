@@ -1,7 +1,7 @@
 use crate::multiplex::pipe_pool::*;
 use std::{
     collections::{btree_map::Entry, BTreeMap},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use super::calc::{BwCalculator, RttCalculator};
@@ -9,16 +9,12 @@ use super::calc::{BwCalculator, RttCalculator};
 #[derive(Debug, Clone)]
 /// An element of Inflight.
 pub struct InflightEntry {
-    seqno: Seqno,
     send_time: Instant,
     retrans: u64,
     payload: Message,
 
     retrans_time: Instant,
     delivered: u64,
-    delivered_time: Instant,
-
-    known_lost: bool,
 }
 
 /// A data structure that tracks in-flight packets.
@@ -31,8 +27,6 @@ pub struct Inflight {
 
     sent: u64,
     retrans: u64,
-    // max_inversion: Duration,
-    // max_acked_sendtime: Instant,
 }
 
 impl Inflight {
@@ -51,28 +45,9 @@ impl Inflight {
         }
     }
 
-    pub fn unacked(&self) -> usize {
-        self.segments.len()
-    }
-
     pub fn inflight(&self) -> usize {
         // all segments that are still in flight
         self.segments.len()
-    }
-
-    pub fn last_minus_first(&self) -> usize {
-        (self
-            .segments
-            .iter()
-            .next_back()
-            .map(|f| *f.0)
-            .unwrap_or_default()
-            - self
-                .segments
-                .iter()
-                .next()
-                .map(|f| *f.0)
-                .unwrap_or_default()) as usize
     }
 
     /// Mark all inflight packets less than a certain sequence number as acknowledged.
@@ -123,14 +98,12 @@ impl Inflight {
         let prev = self.segments.insert(
             seqno,
             InflightEntry {
-                seqno,
                 send_time: now,
                 payload: msg,
                 retrans: 0,
                 retrans_time: rto,
-                known_lost: false,
+
                 delivered: self.bw.delivered(),
-                delivered_time: self.bw.delivered_time(),
             },
         );
         assert!(prev.is_none());
@@ -158,7 +131,7 @@ impl Inflight {
 
                 entry.retrans_time =
                     Instant::now() + rto.mul_f64(2.0f64.powi(entry.retrans as i32).min(60.0));
-                entry.known_lost = false;
+
                 (entry.payload.clone(), old_retrans, entry.retrans_time)
             })?
         };
@@ -176,19 +149,6 @@ impl Inflight {
         Some(payload)
     }
 
-    /// Marks a particular packet as known to be lost. Does not immediately retransmit it yet!
-    pub fn mark_lost(&mut self, seqno: Seqno) -> bool {
-        if let Some(seg) = self.segments.get_mut(&seqno) {
-            seg.known_lost = true;
-            let retrans_time = seg.retrans_time;
-            self.remove_rto(retrans_time, seqno);
-
-            true
-        } else {
-            false
-        }
-    }
-
     fn remove_rto(&mut self, retrans_time: Instant, seqno: Seqno) {
         let rto_entry = self.rtos.entry(retrans_time);
         if let Entry::Occupied(mut o) = rto_entry {
@@ -199,17 +159,8 @@ impl Inflight {
         }
     }
 
-    pub fn min_rtt(&self) -> Duration {
-        self.rtt.min_rtt()
-    }
-
     /// The total bdp of the link, in packets
     pub fn bdp(&self) -> usize {
         (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
-    }
-
-    /// The bandwidth of the link, in RTT/sec
-    pub fn delivery_rate(&self) -> f64 {
-        self.bw.delivery_rate()
     }
 }

@@ -423,9 +423,6 @@ async fn pipe_loop(
                             stats.add_nak(seqno);
                         }
                     }
-                    x => {
-                        log::warn!("ignoring {:?}", x)
-                    }
                 },
 
                 Event::AckTimeout => {

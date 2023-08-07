@@ -99,11 +99,6 @@ impl<T: Clone> Default for Reorderer<T> {
     }
 }
 impl<T: Clone> Reorderer<T> {
-    /// Iterates over all the sequence numbers in the reorder
-    pub fn seqnos(&self) -> impl Iterator<Item = u64> + '_ {
-        self.pkts.keys().copied()
-    }
-
     /// Inserts an item into the reorderer. Returns true iff the item is accepted or has been accepted in the past.
     pub fn insert(&mut self, seq: u64, item: T) -> bool {
         log::trace!("reorder seq={}, min={}", seq, self.min);

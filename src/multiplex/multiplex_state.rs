@@ -100,6 +100,7 @@ impl MultiplexState {
                     additional.to_owned(),
                 );
                 self.stream_tab.insert(stream_id, new_stream);
+                self.stream_update.set();
                 return Ok(handle);
             }
         }
@@ -173,7 +174,6 @@ impl MultiplexState {
                     } => {
                         if let Some(stream) = self.stream_tab.get_mut(stream_id) {
                             stream.inject_incoming(inner);
-                            self.stream_update.set();
                         } else {
                             // create a new stream in the right state. we don't need to do anything else
                             let (mut stream, handle) = StreamState::new_established(
@@ -184,9 +184,10 @@ impl MultiplexState {
                             let stream_id = *stream_id;
                             stream.inject_incoming(inner); // this creates the syn-ack
                             self.stream_tab.insert(stream_id, stream);
-                            self.stream_update.set();
                             accept_callback(handle);
                         }
+
+                        self.stream_update.set();
                     }
                     Message::Rel {
                         kind: _,

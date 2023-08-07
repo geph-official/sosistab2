@@ -198,6 +198,7 @@ impl AsyncWrite for Stream {
                 self.write_ready_future = Some(write_future);
                 let n = self.queues.lock().write_stream.write(buf);
                 self.global_notify.set();
+
                 Poll::Ready(n)
             }
             Poll::Pending => {
@@ -504,6 +505,7 @@ impl StreamState {
                     outgoing_callback(first);
                     self.last_retrans = now;
                 } else {
+                    log::debug!("waiting until the right time...");
                     break;
                 }
             } else {
