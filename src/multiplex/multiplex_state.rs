@@ -79,12 +79,23 @@ impl MultiplexState {
             }
         };
 
+        let mut to_delete = vec![];
         // iterate through every stream, ticking it, finding the minimum of the instants
         let insta = self
             .stream_tab
-            .values_mut()
-            .map(|stream| stream.tick(&mut outgoing_callback))
+            .iter_mut()
+            .flat_map(|(k, stream)| {
+                let v = stream.tick(&mut outgoing_callback);
+                if v.is_none() {
+                    to_delete.push(*k);
+                }
+                v
+            })
             .min();
+
+        for i in to_delete {
+            self.stream_tab.remove(&i);
+        }
 
         insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
     }

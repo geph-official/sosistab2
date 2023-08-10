@@ -99,8 +99,8 @@ impl StreamState {
         self.incoming_queue.push(msg);
     }
 
-    /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at.
-    pub fn tick(&mut self, mut outgoing_callback: impl FnMut(Message)) -> Instant {
+    /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at. Returns None if the correct option is to delete the whole thing.
+    pub fn tick(&mut self, mut outgoing_callback: impl FnMut(Message)) -> Option<Instant> {
         log::trace!("ticking {} at {:?}", self.stream_id, self.phase);
 
         let now: Instant = Instant::now();
@@ -116,7 +116,7 @@ impl StreamState {
                 });
                 let next_resend = now + Duration::from_secs(1);
                 self.phase = Phase::SynSent { next_resend };
-                next_resend
+                Some(next_resend)
             }
             Phase::SynSent { next_resend } => {
                 if self.incoming_queue.drain(..).any(|msg| {
@@ -133,7 +133,7 @@ impl StreamState {
                     self.phase = Phase::Established;
                     self.queues.lock().connected = true;
                     self.local_notify.notify_all();
-                    now
+                    Some(now)
                 } else if now >= next_resend {
                     outgoing_callback(Message::Rel {
                         kind: RelKind::Syn,
@@ -143,9 +143,9 @@ impl StreamState {
                     });
                     let next_resend = now + Duration::from_secs(1);
                     self.phase = Phase::SynSent { next_resend };
-                    next_resend
+                    Some(next_resend)
                 } else {
-                    next_resend
+                    Some(next_resend)
                 }
             }
             Phase::Established => {
@@ -158,7 +158,7 @@ impl StreamState {
                     self.phase = Phase::Closed;
                 }
                 // Finally, calculate the next interval.
-                self.retick_time()
+                Some(self.retick_time())
             }
             Phase::Closed => {
                 self.queues.lock().closed = true;
@@ -171,7 +171,7 @@ impl StreamState {
                         payload: Default::default(),
                     });
                 }
-                now + Duration::from_secs(30)
+                None
             }
         }
     }
