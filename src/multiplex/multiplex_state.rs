@@ -13,12 +13,12 @@ use stdcode::StdcodeSerializeExt;
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
     multiplex::pipe_pool::RelKind,
-    MuxPublic, MuxSecret, Stream,
+    MuxPublic, MuxSecret, MuxStream,
 };
 
 use super::{
     pipe_pool::{Message, OuterMessage},
-    stream::StreamState,
+    stream::stream_state::StreamState,
 };
 
 /// An encapsulation of the entire state of a Multiplex.
@@ -90,7 +90,7 @@ impl MultiplexState {
     }
 
     /// Starts the opening of a connection, returning a Stream in the pending state.
-    pub fn start_open_stream(&mut self, additional: &str) -> anyhow::Result<Stream> {
+    pub fn start_open_stream(&mut self, additional: &str) -> anyhow::Result<MuxStream> {
         for _ in 0..100 {
             let stream_id: u16 = rand::thread_rng().gen();
             if !self.stream_tab.contains_key(&stream_id) {
@@ -112,7 +112,7 @@ impl MultiplexState {
         &mut self,
         msg: OuterMessage,
         mut outgoing_callback: impl FnMut(OuterMessage),
-        mut accept_callback: impl FnMut(Stream),
+        mut accept_callback: impl FnMut(MuxStream),
     ) -> anyhow::Result<()> {
         match msg {
             OuterMessage::ClientHello {
