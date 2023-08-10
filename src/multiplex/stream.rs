@@ -33,6 +33,7 @@ pub struct MuxStream {
     local_notify: Arc<async_event::Event>,
     // queues that connect this facade with the "real deal" in Multiplex
     queues: Arc<Mutex<StreamQueues>>,
+    additional_info: String,
 }
 
 /// SAFETY: because of the definition of AsyncRead, it's not possible to ever concurrently end up polling the futures in the RecycleBoxes.
@@ -44,6 +45,7 @@ impl MuxStream {
         global_notify: Arc<ManualResetEvent>,
         ready: Arc<async_event::Event>,
         queues: Arc<Mutex<StreamQueues>>,
+        additional_info: String,
     ) -> Self {
         Self {
             tick_notify: global_notify,
@@ -56,6 +58,7 @@ impl MuxStream {
             })))),
             write_ready_resolved: true, // forces redoing the future on first write
             local_notify: ready,
+            additional_info,
             queues,
         }
     }
@@ -78,7 +81,7 @@ impl MuxStream {
 
     /// Returns the "additional info" attached to the stream.
     pub fn additional_info(&self) -> &str {
-        "todo"
+        &self.additional_info
     }
 
     /// Shuts down the stream, causing future read and write operations to fail.
@@ -121,6 +124,7 @@ impl Clone for MuxStream {
             self.tick_notify.clone(),
             self.local_notify.clone(),
             self.queues.clone(),
+            self.additional_info.clone(),
         )
     }
 }

@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{congestion::Highspeed, inflight::Inflight, StreamQueues};
-const MSS: usize = 10000;
+const MSS: usize = 1200;
 
 pub struct StreamState {
     phase: Phase,
@@ -69,7 +69,12 @@ impl StreamState {
     ) -> (Self, MuxStream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
-        let handle = MuxStream::new(global_notify, ready.clone(), queues.clone());
+        let handle = MuxStream::new(
+            global_notify,
+            ready.clone(),
+            queues.clone(),
+            additional_data.clone(),
+        );
         let state = Self {
             phase,
             stream_id,
