@@ -289,7 +289,6 @@ impl StreamState {
         let cwnd = self.congestion.cwnd();
         while self.inflight.inflight() < cwnd {
             if queues.write_stream.is_empty() {
-                queues.write_stream.shrink_to_fit();
                 break;
             }
 

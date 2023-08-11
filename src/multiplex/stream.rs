@@ -158,7 +158,7 @@ impl AsyncRead for MuxStream {
                         .wait_until(move || {
                             let mut inner = inner.lock();
                             dbg!(inner.read_stream.capacity());
-                            if inner.read_stream.capacity() > inner.read_stream.len() * 2 {
+                            if inner.read_stream.capacity() > inner.read_stream.len() * 4 {
                                 inner.read_stream.shrink_to_fit();
                             }
                             if !inner.read_stream.is_empty() || inner.closed {
@@ -209,7 +209,7 @@ impl AsyncWrite for MuxStream {
                     write_ready
                         .wait_until(move || {
                             let mut inner = inner.lock();
-                            if inner.write_stream.capacity() > inner.write_stream.len() * 2 {
+                            if inner.write_stream.capacity() > inner.write_stream.len() * 4 {
                                 inner.write_stream.shrink_to_fit();
                             }
                             if inner.write_stream.len() <= 100_000 {
