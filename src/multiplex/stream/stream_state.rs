@@ -36,6 +36,13 @@ pub struct StreamState {
     last_retrans: Instant,
 }
 
+impl Drop for StreamState {
+    fn drop(&mut self) {
+        self.queues.lock().closed = true;
+        self.local_notify.notify_all();
+    }
+}
+
 impl StreamState {
     /// Creates a new StreamState, in the pre-SYN-sent state. Also returns the "user-facing" handle.
     pub fn new_pending(
