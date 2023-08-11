@@ -38,7 +38,7 @@ impl ObfsUdpListener {
     /// Constructor.
     pub fn bind(listen: SocketAddr, server_long_sk: ObfsUdpSecret) -> std::io::Result<Self> {
         let socket = new_udp_socket_bind(listen)?;
-        let (send_new_pipes, recv_new_pipes) = smol::channel::bounded(1000);
+        let (send_new_pipes, recv_new_pipes) = smol::channel::unbounded();
         let task = smolscale::spawn(async move {
             while let Err(err) = listener_loop(
                 socket.clone(),
@@ -161,10 +161,9 @@ async fn listener_loop(
                             } => {
                                 let fallible = async {
                                     let token_info = TokenInfo::decrypt(&token_key, &resume_token)?;
-                                    let (send_upcoded, recv_upcoded) =
-                                        smol::channel::bounded(10000);
+                                    let (send_upcoded, recv_upcoded) = smol::channel::unbounded();
                                     let (send_downcoded, recv_downcoded) =
-                                        smol::channel::bounded(10000);
+                                        smol::channel::unbounded();
                                     // mix the metadata with the session key
                                     let real_session_key = blake3::keyed_hash(
                                         blake3::hash(metadata.as_bytes()).as_bytes(),

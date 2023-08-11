@@ -157,7 +157,7 @@ impl AsyncRead for MuxStream {
                     read_ready
                         .wait_until(move || {
                             let mut inner = inner.lock();
-                            dbg!(inner.read_stream.capacity());
+
                             if inner.read_stream.capacity() > inner.read_stream.len() * 4 {
                                 inner.read_stream.shrink_to_fit();
                             }
