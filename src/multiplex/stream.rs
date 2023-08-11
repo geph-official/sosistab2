@@ -33,7 +33,16 @@ pub struct MuxStream {
     local_notify: Arc<async_event::Event>,
     // queues that connect this facade with the "real deal" in Multiplex
     queues: Arc<Mutex<StreamQueues>>,
-    additional_info: String,
+    additional_info: Arc<String>,
+}
+
+impl Drop for MuxStream {
+    fn drop(&mut self) {
+        if let Some(_nfo) = Arc::get_mut(&mut self.additional_info) {
+            // this means we're the last one!
+            self.queues.lock().closed = true;
+        }
+    }
 }
 
 /// SAFETY: because of the definition of AsyncRead, it's not possible to ever concurrently end up polling the futures in the RecycleBoxes.
@@ -45,7 +54,7 @@ impl MuxStream {
         global_notify: Arc<ManualResetEvent>,
         ready: Arc<async_event::Event>,
         queues: Arc<Mutex<StreamQueues>>,
-        additional_info: String,
+        additional_info: Arc<String>,
     ) -> Self {
         Self {
             tick_notify: global_notify,

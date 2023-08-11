@@ -73,7 +73,7 @@ impl StreamState {
             global_notify,
             ready.clone(),
             queues.clone(),
-            additional_data.clone(),
+            additional_data.clone().into(),
         );
         let state = Self {
             phase,
