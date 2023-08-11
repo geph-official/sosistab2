@@ -41,6 +41,7 @@ impl Drop for MuxStream {
         if let Some(_nfo) = Arc::get_mut(&mut self.additional_info) {
             // this means we're the last one!
             self.queues.lock().closed = true;
+            self.tick_notify.set();
         }
     }
 }
