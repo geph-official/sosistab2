@@ -205,8 +205,7 @@ impl AsyncWrite for MuxStream {
                     write_ready
                         .wait_until(move || {
                             let inner = inner.lock();
-                            if inner.write_stream.len() <= 1_000_000 {
-                                // 1 MB
+                            if inner.write_stream.len() <= 100_000 {
                                 Some(())
                             } else {
                                 None
