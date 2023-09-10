@@ -109,7 +109,7 @@ impl StreamState {
             inflight: Inflight::new(),
             next_write_seqno: 0,
 
-            congestion: Highspeed::new(1, global_cwnd_guess.load(Ordering::SeqCst)),
+            congestion: Highspeed::new(1, (global_cwnd_guess.load(Ordering::SeqCst) / 2).max(1)),
             additional_data,
             last_retrans: Instant::now(),
 
@@ -335,8 +335,6 @@ impl StreamState {
             if now >= retrans_time {
                 if cwnd >= inflight {
                     self.congestion.mark_loss();
-                    self.global_cwnd_guess
-                        .store(self.congestion.cwnd(), Ordering::SeqCst);
                 }
 
                 // we rate-limit retransmissions.
@@ -355,6 +353,9 @@ impl StreamState {
                 break;
             }
         }
+
+        self.global_cwnd_guess
+            .store(self.congestion.cwnd(), Ordering::SeqCst);
     }
 
     fn retick_time(&self) -> Instant {
