@@ -1,6 +1,9 @@
 use std::{
     io::{Read, Write},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -34,6 +37,8 @@ pub struct StreamState {
     next_write_seqno: u64,
     congestion: Highspeed,
     last_retrans: Instant,
+
+    global_cwnd_guess: Arc<AtomicUsize>,
 }
 
 impl Drop for StreamState {
@@ -49,8 +54,15 @@ impl StreamState {
         global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
+        global_cwnd_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
-        Self::new_in_phase(global_notify, stream_id, Phase::Pending, additional_data)
+        Self::new_in_phase(
+            global_notify,
+            stream_id,
+            Phase::Pending,
+            additional_data,
+            global_cwnd_guess,
+        )
     }
 
     /// Creates a new StreamState, in the established state. Also returns the "user-facing" handle.
@@ -58,12 +70,14 @@ impl StreamState {
         global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
+        global_cwnd_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         Self::new_in_phase(
             global_notify,
             stream_id,
             Phase::Established,
             additional_data,
+            global_cwnd_guess,
         )
     }
 
@@ -73,6 +87,7 @@ impl StreamState {
         stream_id: u16,
         phase: Phase,
         additional_data: String,
+        global_cwnd_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
@@ -94,9 +109,11 @@ impl StreamState {
             inflight: Inflight::new(),
             next_write_seqno: 0,
 
-            congestion: Highspeed::new(1),
+            congestion: Highspeed::new(1, global_cwnd_guess.load(Ordering::SeqCst)),
             additional_data,
             last_retrans: Instant::now(),
+
+            global_cwnd_guess,
         };
         (state, handle)
     }
@@ -318,6 +335,8 @@ impl StreamState {
             if now >= retrans_time {
                 if cwnd >= inflight {
                     self.congestion.mark_loss();
+                    self.global_cwnd_guess
+                        .store(self.congestion.cwnd(), Ordering::SeqCst);
                 }
 
                 // we rate-limit retransmissions.

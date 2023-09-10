@@ -10,9 +10,9 @@ pub struct Highspeed {
 
 impl Highspeed {
     /// Creates a new HSTCP instance with the given increment.
-    pub fn new(multiplier: usize) -> Self {
+    pub fn new(multiplier: usize, init_cwnd: usize) -> Self {
         Self {
-            cwnd: 1.0,
+            cwnd: init_cwnd as _,
             multiplier,
             last_loss: Instant::now(),
             bdp: 0,
