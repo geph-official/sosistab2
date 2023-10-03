@@ -6,6 +6,7 @@ use std::{
 use ahash::AHashMap;
 use anyhow::Context;
 
+use bytes::Bytes;
 use futures_intrusive::sync::ManualResetEvent;
 use rand::Rng;
 use rand_chacha::rand_core::OsRng;
@@ -70,7 +71,7 @@ impl MultiplexState {
     pub fn tick(&mut self, mut raw_callback: impl FnMut(OuterMessage)) -> Instant {
         // encryption
         let mut outgoing_callback = |msg: Message| {
-            log::trace!("send {:?}", msg);
+            log::trace!("send in tick {:?}", msg);
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
                 raw_callback(OuterMessage::EncryptedMsg { inner })
@@ -215,22 +216,44 @@ impl MultiplexState {
 
                         self.stream_update.set();
                     }
-                    Message::Rel {
-                        kind: _,
-                        stream_id,
-                        seqno: _,
-                        payload: _,
-                    }
-                    | Message::Urel {
+                    Message::Urel {
                         stream_id,
                         payload: _,
                     } => {
                         let stream = self
                             .stream_tab
                             .get_mut(stream_id)
-                            .context("urel with unknown stream id")?;
+                            .context("dropping urel message with unknown stream id")?;
                         stream.inject_incoming(inner);
                         self.stream_update.set();
+                    }
+
+                    Message::Rel {
+                        kind,
+                        stream_id,
+                        seqno: _,
+                        payload: _,
+                    } => {
+                        if let Some(stream) = self.stream_tab.get_mut(stream_id) {
+                            stream.inject_incoming(inner);
+                            self.stream_update.set();
+                        } else {
+                            // respond with a RST if the kind is not already an RST. This prevents infinite RST loops, but kills connections that the other side thinks exists but we know do not.
+                            if *kind != RelKind::Rst {
+                                let inner = Message::Rel {
+                                    kind: RelKind::Rst,
+                                    stream_id: *stream_id,
+                                    seqno: 0,
+                                    payload: Bytes::new(),
+                                };
+                                let inner = self
+                                    .send_aead
+                                    .as_ref()
+                                    .context("cannot get send_aead to respond with RST")?
+                                    .encrypt(&inner.stdcode());
+                                outgoing_callback(OuterMessage::EncryptedMsg { inner });
+                            }
+                        }
                     }
 
                     Message::Empty => {}
