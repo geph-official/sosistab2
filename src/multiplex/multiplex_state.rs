@@ -67,22 +67,13 @@ impl MultiplexState {
     }
 
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
-    pub fn tick(&mut self, mut outgoing_callback: impl FnMut(OuterMessage)) -> Instant {
+    pub fn tick(&mut self, mut raw_callback: impl FnMut(OuterMessage)) -> Instant {
         // encryption
         let mut outgoing_callback = |msg: Message| {
             log::trace!("send {:?}", msg);
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
-                outgoing_callback(OuterMessage::EncryptedMsg { inner })
-            } else {
-                let hello = OuterMessage::ClientHello {
-                    long_pk: self.local_lsk.to_public(),
-                    eph_pk: (&self.local_esk_send).into(),
-                    version: 1,
-                    timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
-                };
-                log::warn!("no send aead, cannot send anything yet. sending another clienthello");
-                outgoing_callback(hello);
+                raw_callback(OuterMessage::EncryptedMsg { inner })
             }
         };
 
@@ -104,7 +95,20 @@ impl MultiplexState {
             self.stream_tab.remove(&i);
         }
 
-        insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
+        // if we do not have a send_aead, we send a hello and wait a second
+        if self.send_aead.is_none() {
+            let hello = OuterMessage::ClientHello {
+                long_pk: self.local_lsk.to_public(),
+                eph_pk: (&self.local_esk_send).into(),
+                version: 1,
+                timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
+            };
+            log::debug!("no send aead, cannot send anything yet. sending another clienthello");
+            raw_callback(hello);
+            Instant::now() + Duration::from_secs(1)
+        } else {
+            insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
+        }
     }
 
     /// Starts the opening of a connection, returning a Stream in the pending state.
@@ -170,6 +174,8 @@ impl MultiplexState {
                 );
                 log::debug!("send-side symmetric key registered: {:?}", send_secret);
                 self.send_aead = Some(NonObfsAead::new(send_secret.as_bytes()));
+                // we unblock the ticks because the ticker could be in the state where it's slowly retransmitting hellos
+                self.stream_update.set();
                 Ok(())
             }
             OuterMessage::EncryptedMsg { inner } => {
