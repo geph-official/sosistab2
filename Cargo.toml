@@ -35,7 +35,7 @@ indexmap= "1.9.2"
 
 concurrent-queue= "1.2.4"
 rand_chacha= "0.2.2"
-smolscale= "0.3.49"
+smolscale= "0.4"
 
 async-trait= "0.1.59"
 dashmap= "5.4.0"
