@@ -27,6 +27,7 @@ use smol::{
     channel::{Receiver, Sender},
     future::FutureExt,
 };
+use smol_timeout::TimeoutExt;
 use std::{
     cmp::Reverse,
     convert::Infallible,
@@ -140,95 +141,111 @@ impl ObfsUdpPipe {
         server_pk: ObfsUdpPublic,
         metadata: &str,
     ) -> anyhow::Result<ObfsUdpPipe> {
-        let addr = if server_addr.is_ipv4() {
-            "0.0.0.0:0"
-        } else {
-            "[::]:0"
-        }
-        .parse::<SocketAddr>()
-        .unwrap();
-        let socket = new_udp_socket_bind(addr).context("could not bind udp socket")?;
-
-        // do the handshake
-        // generate pk-sk pairs for encryption after the session is established
-        let my_long_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
-        let my_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
-        let cookie = SymmetricFromAsymmetric::new(server_pk.0);
-        // construct the ClientHello message
-        let client_hello_plain = HandshakeFrame::ClientHello {
-            long_pk: (&my_long_sk).into(),
-            eph_pk: (&my_eph_sk).into(),
-            version: 4,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
-        }
-        .to_bytes();
-        // encrypt the ClientHello message
-        let init_enc = ObfsAead::new(&cookie.generate_c2s());
-        let client_hello = init_enc.encrypt(&client_hello_plain);
-        // send the ClientHello
-        socket.send_to(&client_hello, server_addr).await?;
-
-        // wait for the server's response
-        let mut ctext_resp = [0u8; 2048];
-        let (n, _) = socket
-            .recv_from(&mut ctext_resp)
-            .await
-            .context("can't read response from server")?;
-        let ctext_resp = &ctext_resp[..n];
-        // decrypt the server's response
-        let init_dec = ObfsAead::new(&cookie.generate_s2c());
-        let ptext_resp = init_dec.decrypt(ctext_resp)?;
-        let deser_resp = HandshakeFrame::from_bytes(&ptext_resp)?;
-        if let HandshakeFrame::ServerHello {
-            long_pk,
-            eph_pk,
-            resume_token,
-            client_commitment,
-        } = deser_resp
-        {
-            if blake3::Hash::from(client_commitment) != blake3::hash(&client_hello_plain) {
-                anyhow::bail!("the two hellos don't match")
-            }
-            log::trace!("***** server hello received, calculating stuff ******");
-            // finish off the handshake
-            let client_resp = init_enc.encrypt(
-                &HandshakeFrame::ClientResume {
-                    resume_token,
-                    metadata: metadata.into(),
+        let mut timeout = Duration::from_secs(3);
+        loop {
+            let attempt = async {
+                let addr = if server_addr.is_ipv4() {
+                    "0.0.0.0:0"
+                } else {
+                    "[::]:0"
                 }
-                .to_bytes(),
-            );
-            socket.send_to(&client_resp, server_addr).await?;
+                .parse::<SocketAddr>()
+                .unwrap();
+                let socket = new_udp_socket_bind(addr).context("could not bind udp socket")?;
 
-            // create a pipe
-            let (send_upcoded, recv_upcoded) = smol::channel::bounded(1000);
-            let (send_downcoded, recv_downcoded) = smol::channel::bounded(1000);
-            let pipe = ObfsUdpPipe::with_custom_transport(
-                recv_downcoded,
-                send_upcoded,
-                server_addr,
-                metadata,
-            );
+                // do the handshake
+                // generate pk-sk pairs for encryption after the session is established
+                let my_long_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
+                let my_eph_sk = x25519_dalek::StaticSecret::new(rand::thread_rng());
+                let cookie = SymmetricFromAsymmetric::new(server_pk.0);
+                // construct the ClientHello message
+                let client_hello_plain = HandshakeFrame::ClientHello {
+                    long_pk: (&my_long_sk).into(),
+                    eph_pk: (&my_eph_sk).into(),
+                    version: 4,
+                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+                }
+                .to_bytes();
+                // encrypt the ClientHello message
+                let init_enc = ObfsAead::new(&cookie.generate_c2s());
+                let client_hello = init_enc.encrypt(&client_hello_plain);
+                // send the ClientHello
+                socket.send_to(&client_hello, server_addr).await?;
 
-            // start background encrypting/decrypting + forwarding task
-            let shared_secret = triple_ecdh(&my_long_sk, &my_eph_sk, &long_pk, &eph_pk);
-            log::trace!("CLIENT shared_secret: {:?}", shared_secret);
-            let real_sess_key = blake3::keyed_hash(
-                blake3::hash(metadata.as_bytes()).as_bytes(),
-                shared_secret.as_bytes(),
-            );
-            smolscale::spawn(client_loop(
-                recv_upcoded,
-                send_downcoded,
-                socket,
-                server_addr,
-                real_sess_key,
-            ))
-            .detach();
+                // wait for the server's response
+                let mut ctext_resp = [0u8; 2048];
+                let (n, _) = socket
+                    .recv_from(&mut ctext_resp)
+                    .await
+                    .context("can't read response from server")?;
+                let ctext_resp = &ctext_resp[..n];
+                // decrypt the server's response
+                let init_dec = ObfsAead::new(&cookie.generate_s2c());
+                let ptext_resp = init_dec.decrypt(ctext_resp)?;
+                let deser_resp = HandshakeFrame::from_bytes(&ptext_resp)?;
+                if let HandshakeFrame::ServerHello {
+                    long_pk,
+                    eph_pk,
+                    resume_token,
+                    client_commitment,
+                } = deser_resp
+                {
+                    if blake3::Hash::from(client_commitment) != blake3::hash(&client_hello_plain) {
+                        anyhow::bail!("the two hellos don't match")
+                    }
+                    log::trace!("***** server hello received, calculating stuff ******");
+                    // finish off the handshake
+                    let client_resp = init_enc.encrypt(
+                        &HandshakeFrame::ClientResume {
+                            resume_token,
+                            metadata: metadata.into(),
+                        }
+                        .to_bytes(),
+                    );
+                    socket.send_to(&client_resp, server_addr).await?;
 
-            Ok(pipe)
-        } else {
-            anyhow::bail!("server sent unrecognizable message")
+                    // create a pipe
+                    let (send_upcoded, recv_upcoded) = smol::channel::bounded(1000);
+                    let (send_downcoded, recv_downcoded) = smol::channel::bounded(1000);
+                    let pipe = ObfsUdpPipe::with_custom_transport(
+                        recv_downcoded,
+                        send_upcoded,
+                        server_addr,
+                        metadata,
+                    );
+
+                    // start background encrypting/decrypting + forwarding task
+                    let shared_secret = triple_ecdh(&my_long_sk, &my_eph_sk, &long_pk, &eph_pk);
+                    log::trace!("CLIENT shared_secret: {:?}", shared_secret);
+                    let real_sess_key = blake3::keyed_hash(
+                        blake3::hash(metadata.as_bytes()).as_bytes(),
+                        shared_secret.as_bytes(),
+                    );
+                    smolscale::spawn(client_loop(
+                        recv_upcoded,
+                        send_downcoded,
+                        socket,
+                        server_addr,
+                        real_sess_key,
+                    ))
+                    .detach();
+
+                    Ok(pipe)
+                } else {
+                    anyhow::bail!("server sent unrecognizable message")
+                }
+            };
+
+            match attempt.timeout(timeout).await {
+                Some(val) => return val,
+                None => {
+                    log::debug!(
+                        "connect attempt to {server_addr} timed out after {:?}, retrying!",
+                        timeout
+                    );
+                    timeout = (timeout * 2).min(Duration::from_secs(600))
+                }
+            }
         }
     }
 }
