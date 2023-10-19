@@ -117,9 +117,11 @@ async fn listener_loop(
                                     .duration_since(SystemTime::UNIX_EPOCH)
                                     .unwrap()
                                     .as_secs();
-                                log::debug!("my time {current_timestamp}, their time {timestamp}");
+                                log::debug!(
+                                    "my time {current_timestamp}, their time {timestamp}, diff {}",
+                                    current_timestamp.abs_diff(timestamp)
+                                );
                                 if current_timestamp.abs_diff(timestamp) > 60 {
-                                    log::warn!("time too skewed, so skipping");
                                     continue;
                                 }
 

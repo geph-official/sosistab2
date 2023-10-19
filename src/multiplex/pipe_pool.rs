@@ -166,7 +166,6 @@ impl SinglePipe {
         .race(async move {
             let mut wait_millis = 1000;
             loop {
-                log::warn!("sending ping");
                 pipe.send(Bytes::from_static(b"!!ping!!"));
                 smol::Timer::after(Duration::from_millis(wait_millis)).await;
                 wait_millis = fastrand::u64(wait_millis..=(wait_millis * 2)).min(100000)
@@ -203,13 +202,11 @@ async fn stats_gatherer_loop(
             for pipe in pipes.iter() {
                 let pipe = pipe.clone();
                 ping_gatherer.push(async move {
-                    log::warn!("gonna measure ping of {}", pipe.pipe.peer_addr());
                     let ping = pipe.measure_ping().await;
                     (pipe, ping)
                 })
             }
         }
-        log::warn!("pushed");
         if let Some((best, ping)) = ping_gatherer.next().await {
             log::warn!(
                 "picked best pipe {}/{} with ping {:?}",
@@ -280,7 +277,6 @@ impl PipePool {
                 let selected = self.selected_send_pipe.lock().clone();
                 if let Some(selected) = selected {
                     if selected.peer_addr() == front.pipe.peer_addr() {
-                        log::warn!("was about to take out out frontrunner, so taking something else instead");
                         pipes.pop_front();
                         pipes.push_back(front);
                     }
