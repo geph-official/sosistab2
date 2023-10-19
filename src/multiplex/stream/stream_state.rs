@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{congestion::Highspeed, inflight::Inflight, StreamQueues};
-const MSS: usize = 1200;
+const MSS: usize = 12000;
 
 pub struct StreamState {
     phase: Phase,
@@ -336,19 +336,11 @@ impl StreamState {
                 if cwnd >= inflight {
                     self.congestion.mark_loss();
                 }
-
-                // we rate-limit retransmissions.
-                // this is a quick and dirty way of preventing retransmissions themselves from overwhelming the network right when the pipe is full
-                if now.saturating_duration_since(self.last_retrans).as_millis() > 10 {
-                    log::debug!("after loss: {inflight}/{cwnd} of cwnd");
-                    log::debug!("RTO retransmit {}", seqno);
-                    let first = self.inflight.retransmit(seqno).expect("no first");
-                    outgoing_callback(first);
-                    self.last_retrans = now;
-                } else {
-                    log::debug!("waiting until the right time...");
-                    break;
-                }
+                log::debug!("after loss: {inflight}/{cwnd} of cwnd");
+                log::debug!("RTO retransmit {}", seqno);
+                let first = self.inflight.retransmit(seqno).expect("no first");
+                outgoing_callback(first);
+                self.last_retrans = now;
             } else {
                 break;
             }

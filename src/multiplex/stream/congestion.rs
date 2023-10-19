@@ -34,7 +34,7 @@ impl Highspeed {
     pub fn mark_loss(&mut self) {
         self.cwnd = (self.cwnd * 0.5)
             .max(1.0)
-            .max(self.bdp as f64 * 0.8)
+            // .max(self.bdp as f64 * 0.9)
             .min(self.cwnd);
         self.last_loss = Instant::now();
     }

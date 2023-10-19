@@ -1,41 +1,53 @@
 use std::time::{Duration, Instant};
 
-use crate::utilities::EmaCalculator;
-
 pub struct RttCalculator {
-    inner: EmaCalculator,
-
+    estimated_rtt: Duration,
+    dev_rtt: Duration,
     min_rtt: Duration,
-    rtt_update_time: Instant,
+    min_rtt_time: Instant,
+    rtt_time: Instant,
 }
 
 impl Default for RttCalculator {
     fn default() -> Self {
         RttCalculator {
-            inner: EmaCalculator::new(0.5, 0.01),
-            min_rtt: Duration::from_millis(500),
-            rtt_update_time: Instant::now(),
+            estimated_rtt: Duration::from_secs(1),
+            dev_rtt: Duration::from_secs(0),
+            min_rtt: Duration::from_secs(1),
+            min_rtt_time: Instant::now(),
+            rtt_time: Instant::now(),
         }
     }
 }
 
 impl RttCalculator {
     pub fn record_sample(&mut self, sample: Duration) {
+        let alpha: f64 = 0.125;
+        let beta: f64 = 0.25;
         let now = Instant::now();
-        if sample < self.min_rtt
-            || now
-                .saturating_duration_since(self.rtt_update_time)
-                .as_millis()
-                > 30000
+
+        // Update minimum RTT
+        if sample < self.min_rtt || now.saturating_duration_since(self.min_rtt_time).as_secs() > 30
         {
             self.min_rtt = sample;
-            self.rtt_update_time = now;
+            self.min_rtt_time = now;
         }
-        self.inner.update(sample.as_secs_f64())
+        if now.saturating_duration_since(self.rtt_time) > self.estimated_rtt {
+            // Update EstimatedRTT and DevRTT
+            self.estimated_rtt = Duration::from_secs_f64(
+                (1.0 - alpha) * self.estimated_rtt.as_secs_f64() + alpha * sample.as_secs_f64(),
+            );
+            self.dev_rtt = Duration::from_secs_f64(
+                (1.0 - beta) * self.dev_rtt.as_secs_f64()
+                    + beta * (sample.as_secs_f64() - self.estimated_rtt.as_secs_f64()).abs(),
+            );
+            self.rtt_time = now;
+        }
     }
 
     pub fn rto(&self) -> Duration {
-        Duration::from_secs_f64(self.inner.inverse_cdf(0.99) + 0.25)
+        (self.estimated_rtt + Duration::from_secs_f64(4.0 * self.dev_rtt.as_secs_f64()))
+            + Duration::from_millis(50)
     }
 
     pub fn min_rtt(&self) -> Duration {
