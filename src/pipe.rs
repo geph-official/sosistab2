@@ -1,11 +1,7 @@
-mod obfs_tls;
-mod obfs_udp;
 use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-pub use obfs_tls::*;
-pub use obfs_udp::*;
 
 use smol::future::FutureExt;
 

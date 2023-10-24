@@ -1,11 +1,7 @@
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
-use std::{
-    any::Any,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use concurrent_queue::ConcurrentQueue;
 

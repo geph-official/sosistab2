@@ -13,7 +13,7 @@ repository="https://github.com/geph-official/sosistab2"
 [dependencies]
 
 smol= "1.3.0"
-socket2 = "0.3.19"
+
 x25519-dalek={ version = "1.1.1", features = ["serde"] }
 serde={ version = "1.0.148", features = ["derive", "rc"] }
 # bytes={ version = "1.0.0", features = ["serde"] }
@@ -23,14 +23,14 @@ event-listener= "2.5.3"
 futures-util = "0.3.25"
 parking_lot= "0.12"
 # governor= "0.3.1"
-async-dup= "1.2.2"
+
 once_cell = "1.16.0"
-arc-swap= "1.5.1"
+
 num_cpus= "1.14.0"
 
 anyhow= "1.0.66"
 scopeguard= "1.1.0"
-reed-solomon-erasure= "6.0.0"
+
 indexmap= "1.9.2"
 
 concurrent-queue= "1.2.4"
@@ -41,7 +41,6 @@ async-trait= "0.1.59"
 dashmap= "5.4.0"
 smol-timeout = "0.6.0"
 
-tracing={ version = "0.1.37", features = ["log"] }
 
 cached= "0.26.2"
 
@@ -51,12 +50,8 @@ thiserror = "1.0.37"
 
 hex= "0.4.3"
 fastrand= "1.8.0"
-sluice="0.5"  
-# Pipe= "0.2.2"
 
-probability = "0.17.0"
 
-priority-queue = "1.3.0"
 slab = "0.4.7"
 
 bytes={ version = "1.3.0", features = ["serde"] }
@@ -64,7 +59,6 @@ pin-project= "1.0.12"
 
 
 log = "0.4.17"
-lru = "0.8.1"
 
 arrayref = "0.3.6"
 
@@ -73,20 +67,18 @@ stdcode = "0.1.13"
 microsleep = { version = "0.1.14", optional = true }
 
 
-async-native-tls = { version = "0.4.0", features = ["vendored"] }
-native-tls = "0.2.11"
 subtle = "2.4.1"
 
 derivative = "2.2.0"
 
 ring = "0.16.20"
-smol_str = "0.1.23"
+
 itertools = "0.10.5"
-moka = "0.9"
+
 
 replay_filter = {version = "0.1", path="lib/replay_filter"}
 ahash = {version="0.8.3", features=["serde"]}
-tachyonix = "0.2.1"
+
 async-event = "0.1.0"
 diatomic-waker = "0.1.0"
 recycle-box = "0.2.0"
@@ -116,8 +108,8 @@ criterion = "0.3.6"
 rcgen = "0.10.0"
 dirs= "4.0.0"
 itertools = "0.10.5"
-smol_str = "0.1.23"
-moka="0.9"
+
+
 
 
 [[bench]]
