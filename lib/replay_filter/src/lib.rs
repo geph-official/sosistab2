@@ -36,3 +36,29 @@ impl ReplayFilter {
         self.bottom_seqno = new_starting;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_replay_filter_failure() {
+        let mut replay_filter = ReplayFilter::default();
+
+        // Initial large sequence number leading to frameshift
+        assert_eq!(replay_filter.add(8_192), true);
+
+        // Adding sequence numbers after frameshift
+        for i in 4_096..8_192 {
+            assert_eq!(replay_filter.add(i), true);
+        }
+
+        // Repeating sequence numbers
+        for i in 4_096..8_192 {
+            // This assertion should hold
+            // Repeated sequence numbers should be rejected,
+            // but due to frameshift, they are not in the bitmap and get accepted.
+            assert_eq!(replay_filter.add(i), false);
+        }
+    }
+}
