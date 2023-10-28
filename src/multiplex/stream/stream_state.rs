@@ -37,6 +37,8 @@ pub struct StreamState {
     next_write_seqno: u64,
     last_retrans: Instant,
     speed: f64,
+    speed_max: f64,
+
     next_trans: Instant,
     in_recovery: bool,
 
@@ -110,7 +112,8 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: global_speed_guess.load(Ordering::Relaxed) as f64 * 0.8,
+            speed: 10.0,
+            speed_max: 0.0,
             next_trans: Instant::now(),
             in_recovery: false,
 
@@ -236,12 +239,15 @@ impl StreamState {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
-                    let old_speed = self.speed;
-                    self.speed += 3.0 * (kb_speed).powf(0.4).max(1.0) * n as f64 / self.speed;
-                    self.speed = self
-                        .speed
-                        .min(self.inflight.delivery_rate() * 1.2)
-                        .max(old_speed);
+
+                    // use BIC congestion control
+                    let bic_inc = if self.speed < self.speed_max {
+                        ((self.speed_max - self.speed) / 2.0).min(self.speed)
+                    } else {
+                        (self.speed - self.speed_max).max(n as f64)
+                    };
+                    self.speed += (bic_inc / self.speed);
+
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
@@ -327,7 +333,14 @@ impl StreamState {
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
                     if !self.in_recovery {
-                        self.speed *= 0.8;
+                        // BIC
+                        let beta = 0.3;
+                        if self.speed < self.speed_max {
+                            self.speed_max = self.speed * (2.0 - beta) / 2.0;
+                        } else {
+                            self.speed_max = self.speed;
+                        }
+                        self.speed *= 1.0 - beta;
                         self.global_speed_guess
                             .store(self.speed as usize, Ordering::Relaxed);
                         self.in_recovery = true;
