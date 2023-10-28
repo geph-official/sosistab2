@@ -238,6 +238,9 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    if n > 0 {
+                        self.in_recovery = false;
+                    }
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
                     let old_speed = self.speed;
                     // use BIC congestion control
@@ -247,7 +250,7 @@ impl StreamState {
                         self.speed - self.speed_max
                     }
                     .max(n as f64 * 3.0)
-                    .min(n as f64 * 30.0);
+                    .min(n as f64 * 50.0);
                     log::debug!("bic_inc = {bic_inc}");
                     self.speed += bic_inc / self.speed;
                     self.speed = self
@@ -366,7 +369,6 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if self.inflight.inflight() < MAX_CWND && !queues.write_stream.is_empty() {
-                self.in_recovery = false;
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
                 buffer.truncate(n);
