@@ -237,7 +237,7 @@ impl StreamState {
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
                     let old_speed = self.speed;
-                    self.speed += (kb_speed).powf(0.4).max(1.0) * n as f64 / self.speed;
+                    self.speed += 3.0 * (kb_speed).powf(0.4).max(1.0) * n as f64 / self.speed;
                     self.speed = self
                         .speed
                         .min(self.inflight.delivery_rate() * 1.2)
