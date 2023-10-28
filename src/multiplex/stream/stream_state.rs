@@ -247,8 +247,9 @@ impl StreamState {
                     let bic_inc = if self.speed < self.speed_max {
                         ((self.speed_max - self.speed) / 2.0).min(self.speed)
                     } else {
-                        (self.speed - self.speed_max).max(n as f64 * 3.0)
-                    };
+                        self.speed - self.speed_max
+                    }
+                    .max(n as f64 * 3.0);
                     self.speed += bic_inc / self.speed;
 
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
