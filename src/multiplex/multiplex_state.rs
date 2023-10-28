@@ -63,7 +63,7 @@ impl MultiplexState {
             stream_tab: AHashMap::new(),
             stream_update,
 
-            global_cwnd_guess: Arc::new(AtomicUsize::new(1)),
+            global_cwnd_guess: Arc::new(AtomicUsize::new(100)),
         }
     }
 

@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 12000;
+const MSS: usize = 1300;
 
 pub struct StreamState {
     phase: Phase,
@@ -40,7 +40,7 @@ pub struct StreamState {
     next_trans: Instant,
     in_recovery: bool,
 
-    global_cwnd_guess: Arc<AtomicUsize>,
+    global_speed_guess: Arc<AtomicUsize>,
 }
 
 impl Drop for StreamState {
@@ -56,14 +56,14 @@ impl StreamState {
         global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
-        global_cwnd_guess: Arc<AtomicUsize>,
+        global_speed_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         Self::new_in_phase(
             global_notify,
             stream_id,
             Phase::Pending,
             additional_data,
-            global_cwnd_guess,
+            global_speed_guess,
         )
     }
 
@@ -72,14 +72,14 @@ impl StreamState {
         global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
-        global_cwnd_guess: Arc<AtomicUsize>,
+        global_speed_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         Self::new_in_phase(
             global_notify,
             stream_id,
             Phase::Established,
             additional_data,
-            global_cwnd_guess,
+            global_speed_guess,
         )
     }
 
@@ -89,7 +89,7 @@ impl StreamState {
         stream_id: u16,
         phase: Phase,
         additional_data: String,
-        global_cwnd_guess: Arc<AtomicUsize>,
+        global_speed_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
@@ -110,14 +110,14 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: 100.0 * 1000.0 / (MSS as f64), // 100 KB/s
+            speed: global_speed_guess.load(Ordering::Relaxed) as f64,
             next_trans: Instant::now(),
             in_recovery: false,
 
             additional_data,
             last_retrans: Instant::now(),
 
-            global_cwnd_guess,
+            global_speed_guess,
         };
         (state, handle)
     }
@@ -237,7 +237,7 @@ impl StreamState {
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
                     self.speed += (kb_speed).powf(0.4).max(1.0) * n as f64 / self.speed;
-                    self.speed = self.speed.min(dbg!(self.inflight.delivery_rate() * 1.2));
+                    self.speed = self.speed.min(self.inflight.delivery_rate() * 1.2);
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
@@ -324,6 +324,8 @@ impl StreamState {
                 if now >= retrans_time {
                     if !self.in_recovery {
                         self.speed *= 0.8;
+                        self.global_speed_guess
+                            .store(self.speed as usize, Ordering::Relaxed);
                         self.in_recovery = true;
                     }
                     log::debug!("RTO retransmit {}", seqno);
