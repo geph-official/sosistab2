@@ -307,6 +307,10 @@ impl StreamState {
         let send_allowed = self.next_trans <= now;
         self.next_trans = (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
         if send_allowed {
+            eprintln!(
+                "send_allowed because we are {:?} since next_trans",
+                now.saturating_duration_since(self.next_trans)
+            );
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
