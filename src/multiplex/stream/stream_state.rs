@@ -110,7 +110,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: global_speed_guess.load(Ordering::Relaxed) as f64,
+            speed: global_speed_guess.load(Ordering::Relaxed) as f64 * 0.8,
             next_trans: Instant::now(),
             in_recovery: false,
 
