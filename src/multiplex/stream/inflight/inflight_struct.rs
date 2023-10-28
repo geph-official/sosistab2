@@ -73,7 +73,7 @@ impl Inflight {
         if let Some((first_seqno, first_entry)) = self.segments.iter_mut().next() {
             if acked_seqno > first_seqno + 3 {
                 log::warn!(
-                    "fastack triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
+                    "fast retransmit triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
                 );
                 first_entry.retrans_time = Instant::now();
             }
