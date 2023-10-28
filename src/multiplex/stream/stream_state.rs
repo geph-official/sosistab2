@@ -307,6 +307,7 @@ impl StreamState {
         // every time we add another segment, we also transmit it, and set the RTO.
         let send_allowed = self.next_trans <= now;
         self.next_trans = (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
+        log::debug!("next_trans set! send_allowed = {send_allowed}");
         if send_allowed {
             log::debug!(
                 "send_allowed because we are {:?} since next_trans",
