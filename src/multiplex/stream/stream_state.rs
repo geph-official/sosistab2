@@ -210,7 +210,7 @@ impl StreamState {
     fn tick_read(&mut self, _now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // Put all incoming packets into the reorderer.
         let mut to_ack = vec![];
-
+        let mut start_recovery = false;
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
             // This unifies flow control with congestion control at the cost of a bit of efficiency.
@@ -238,15 +238,18 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    if n == 0 {
+                        start_recovery = true;
+                    }
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
 
                     // use BIC congestion control
                     let bic_inc = if self.speed < self.speed_max {
                         ((self.speed_max - self.speed) / 2.0).min(self.speed)
                     } else {
-                        (self.speed - self.speed_max).max(n as f64)
+                        (self.speed - self.speed_max).max(n as f64 * 3.0)
                     };
-                    self.speed += (bic_inc / self.speed);
+                    self.speed += bic_inc / self.speed;
 
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
@@ -304,13 +307,30 @@ impl StreamState {
                 payload: to_ack.stdcode().into(),
             });
         }
+        if start_recovery {
+            self.start_recovery()
+        }
+    }
+
+    fn start_recovery(&mut self) {
+        if !self.in_recovery {
+            // BIC
+            let beta = 0.3;
+            if self.speed < self.speed_max {
+                self.speed_max = self.speed * (2.0 - beta) / 2.0;
+            } else {
+                self.speed_max = self.speed;
+            }
+            self.speed *= 1.0 - beta;
+            self.global_speed_guess
+                .store(self.speed as usize, Ordering::Relaxed);
+            self.in_recovery = true;
+        }
     }
 
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
-        let mut queues = self.queues.lock();
-
         // we first handle unreliable datagrams
-        while let Some(payload) = queues.send_urel.pop_front() {
+        while let Some(payload) = self.queues.lock().send_urel.pop_front() {
             outgoing_callback(Message::Urel {
                 stream_id: self.stream_id,
                 payload,
@@ -332,19 +352,7 @@ impl StreamState {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
-                    if !self.in_recovery {
-                        // BIC
-                        let beta = 0.3;
-                        if self.speed < self.speed_max {
-                            self.speed_max = self.speed * (2.0 - beta) / 2.0;
-                        } else {
-                            self.speed_max = self.speed;
-                        }
-                        self.speed *= 1.0 - beta;
-                        self.global_speed_guess
-                            .store(self.speed as usize, Ordering::Relaxed);
-                        self.in_recovery = true;
-                    }
+                    self.start_recovery();
                     log::debug!("RTO retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
@@ -355,6 +363,7 @@ impl StreamState {
             }
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
+            let mut queues = self.queues.lock();
             if self.inflight.inflight() < MAX_CWND && !queues.write_stream.is_empty() {
                 self.in_recovery = false;
                 let mut buffer = vec![0; MSS];
