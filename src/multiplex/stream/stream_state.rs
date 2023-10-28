@@ -235,6 +235,7 @@ impl StreamState {
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
                     self.speed += (kb_speed).powf(0.4).max(1.0) * n as f64 / self.speed;
+                    self.speed = self.speed.min(self.inflight.delivery_rate() * 1.2);
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
