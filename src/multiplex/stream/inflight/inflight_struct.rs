@@ -70,14 +70,14 @@ impl Inflight {
 
     /// Marks a particular inflight packet as acknowledged. Returns whether or not there was actually such an inflight packet.
     pub fn mark_acked(&mut self, acked_seqno: Seqno) -> bool {
-        if let Some((first_seqno, first_entry)) = self.segments.iter_mut().next() {
-            if acked_seqno > first_seqno + 3 {
-                log::warn!(
-                    "fast retransmit triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
-                );
-                first_entry.retrans_time = Instant::now();
-            }
-        }
+        // if let Some((first_seqno, first_entry)) = self.segments.iter_mut().next() {
+        //     if acked_seqno > first_seqno + 3 {
+        //         log::warn!(
+        //             "fast retransmit triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
+        //         );
+        //         first_entry.retrans_time = Instant::now();
+        //     }
+        // }
 
         let now = Instant::now();
 
