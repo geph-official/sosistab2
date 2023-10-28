@@ -242,11 +242,12 @@ impl StreamState {
                     let old_speed = self.speed;
                     // use BIC congestion control
                     let bic_inc = if self.speed < self.speed_max {
-                        ((self.speed_max - self.speed) / 2.0).min(self.speed)
+                        (self.speed_max - self.speed) / 2.0
                     } else {
                         self.speed - self.speed_max
                     }
-                    .max(n as f64 * 3.0);
+                    .max(n as f64 * 3.0)
+                    .min(n as f64 * 30.0);
                     log::debug!("bic_inc = {bic_inc}");
                     self.speed += bic_inc / self.speed;
                     self.speed = self
