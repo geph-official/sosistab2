@@ -109,7 +109,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: 10.0,
+            speed: 100.0,
             next_trans: Instant::now(),
 
             additional_data,
@@ -307,7 +307,7 @@ impl StreamState {
         let send_allowed = self.next_trans <= now;
         self.next_trans = (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
         if send_allowed {
-            eprintln!(
+            log::debug!(
                 "send_allowed because we are {:?} since next_trans",
                 now.saturating_duration_since(self.next_trans)
             );
