@@ -109,7 +109,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: 10.0,
+            speed: 1000.0 * 1000.0 / (MSS as f64), // 100 KB/s
             next_trans: Instant::now(),
 
             additional_data,
@@ -291,7 +291,6 @@ impl StreamState {
     }
 
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
-        log::debug!("tick_write");
         let mut queues = self.queues.lock();
 
         // we first handle unreliable datagrams
@@ -308,7 +307,6 @@ impl StreamState {
         let send_allowed = self.next_trans <= now;
         let next_next_trans =
             (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
-        log::debug!("next_trans set! send_allowed = {send_allowed}");
         if send_allowed {
             log::debug!(
                 "send_allowed because we are {:?} since next_trans; {:?} since next_next_trans",
