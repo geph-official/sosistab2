@@ -72,7 +72,7 @@ impl Inflight {
     pub fn mark_acked(&mut self, acked_seqno: Seqno) -> bool {
         let mut to_remove = None;
         if let Some((first_seqno, first_entry)) = self.segments.iter_mut().next() {
-            if acked_seqno > first_seqno + 2 {
+            if acked_seqno > first_seqno + 5 {
                 log::debug!(
                     "fast retransmit triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
                 );
