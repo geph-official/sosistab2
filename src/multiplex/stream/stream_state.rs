@@ -306,7 +306,8 @@ impl StreamState {
 
         // every time we add another segment, we also transmit it, and set the RTO.
         let send_allowed = self.next_trans <= now;
-        self.next_trans = (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
+        let next_next_trans =
+            (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
         log::debug!("next_trans set! send_allowed = {send_allowed}");
         if send_allowed {
             log::debug!(
@@ -320,6 +321,7 @@ impl StreamState {
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
                     self.last_retrans = now;
+                    self.next_trans = next_next_trans;
                     return;
                 }
             }
@@ -343,6 +345,7 @@ impl StreamState {
                 self.local_notify.notify_all();
 
                 log::trace!("filled window to {}", self.inflight.inflight());
+                self.next_trans = next_next_trans;
             }
         }
     }
