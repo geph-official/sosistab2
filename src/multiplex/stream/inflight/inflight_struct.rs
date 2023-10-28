@@ -147,7 +147,7 @@ impl Inflight {
                 entry.retrans += 1;
 
                 entry.retrans_time =
-                    Instant::now() + rto.mul_f64(2.0f64.powi(entry.retrans as i32).min(60.0));
+                    Instant::now() + dbg!(rto.mul_f64(2.0f64.powi(entry.retrans as i32).min(60.0)));
 
                 (entry.payload.clone(), old_retrans, entry.retrans_time)
             })?
