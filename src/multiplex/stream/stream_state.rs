@@ -109,7 +109,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: 100.0,
+            speed: 10.0,
             next_trans: Instant::now(),
 
             additional_data,
@@ -291,6 +291,7 @@ impl StreamState {
     }
 
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
+        log::debug!("tick_write");
         let mut queues = self.queues.lock();
 
         // we first handle unreliable datagrams
@@ -346,17 +347,17 @@ impl StreamState {
     }
 
     fn retick_time(&self) -> Instant {
-        Instant::now() + Duration::from_millis(10)
-        // let first_rto = self
-        //     .inflight
-        //     .first_rto()
-        //     .map(|s| s.1)
-        //     .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000));
-        // if self.queues.lock().write_stream.is_empty() {
-        //     first_rto.max(self.next_trans)
-        // } else {
-        //     first_rto.min(self.next_trans)
-        // }
+        // Instant::now() + Duration::from_millis(10)
+        let first_rto = self
+            .inflight
+            .first_rto()
+            .map(|s| s.1)
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000));
+        if self.queues.lock().write_stream.is_empty() {
+            first_rto.max(self.next_trans)
+        } else {
+            first_rto.min(self.next_trans)
+        }
     }
 }
 
