@@ -311,8 +311,9 @@ impl StreamState {
         log::debug!("next_trans set! send_allowed = {send_allowed}");
         if send_allowed {
             log::debug!(
-                "send_allowed because we are {:?} since next_trans",
-                now.saturating_duration_since(self.next_trans)
+                "send_allowed because we are {:?} since next_trans; {:?} since next_next_trans",
+                now.saturating_duration_since(self.next_trans),
+                now.saturating_duration_since(next_next_trans)
             );
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
