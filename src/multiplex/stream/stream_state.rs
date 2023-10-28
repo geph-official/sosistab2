@@ -17,7 +17,7 @@ use crate::{
     MuxStream,
 };
 
-use super::{congestion::Highspeed, inflight::Inflight, StreamQueues};
+use super::{inflight::Inflight, StreamQueues};
 const MSS: usize = 12000;
 
 pub struct StreamState {
@@ -35,8 +35,9 @@ pub struct StreamState {
     // write variables
     inflight: Inflight,
     next_write_seqno: u64,
-    congestion: Highspeed,
     last_retrans: Instant,
+    speed: f64,
+    next_trans: Instant,
 
     global_cwnd_guess: Arc<AtomicUsize>,
 }
@@ -108,8 +109,9 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
+            speed: 10.0,
+            next_trans: Instant::now(),
 
-            congestion: Highspeed::new(1, (global_cwnd_guess.load(Ordering::SeqCst) / 2).max(1)),
             additional_data,
             last_retrans: Instant::now(),
 
@@ -230,9 +232,7 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    for _ in 0..self.inflight.mark_acked_lt(lowest_unseen_seqno) {
-                        self.congestion.mark_ack(self.inflight.bdp());
-                    }
+                    self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
@@ -301,53 +301,44 @@ impl StreamState {
             });
         }
 
-        // we attempt to fill the congestion window as far as possible.
+        const MAX_CWND: usize = 10000;
+
         // every time we add another segment, we also transmit it, and set the RTO.
-        let cwnd = self.congestion.cwnd();
-        while self.inflight.inflight() < cwnd {
-            if queues.write_stream.is_empty() {
-                break;
-            }
-
-            let mut buffer = vec![0; MSS];
-            let n = queues.write_stream.read(&mut buffer).unwrap();
-            buffer.truncate(n);
-            let seqno = self.next_write_seqno;
-            self.next_write_seqno += 1;
-            let msg = Message::Rel {
-                kind: RelKind::Data,
-                stream_id: self.stream_id,
-                seqno,
-                payload: buffer.into(),
-            };
-            self.inflight.insert(msg.clone());
-            outgoing_callback(msg);
-
-            self.local_notify.notify_all();
-
-            log::trace!("filled {}/{} of cwnd", self.inflight.inflight(), cwnd);
-        }
-
-        // then, we do any retransmissions if necessary
-        while let Some((seqno, retrans_time)) = self.inflight.first_rto() {
-            let cwnd = self.congestion.cwnd();
-            let inflight = self.inflight.inflight();
-            if now >= retrans_time {
-                if cwnd >= inflight {
-                    self.congestion.mark_loss();
+        let send_allowed = self.next_trans <= now;
+        self.next_trans = (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
+        if send_allowed {
+            // we do any retransmissions if necessary
+            if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
+                if now >= retrans_time {
+                    log::debug!("RTO retransmit {}", seqno);
+                    let first = self.inflight.retransmit(seqno).expect("no first");
+                    outgoing_callback(first);
+                    self.last_retrans = now;
+                    return;
                 }
-                log::debug!("after loss: {inflight}/{cwnd} of cwnd");
-                log::debug!("RTO retransmit {}", seqno);
-                let first = self.inflight.retransmit(seqno).expect("no first");
-                outgoing_callback(first);
-                self.last_retrans = now;
-            } else {
-                break;
+            }
+
+            // okay, we don't have retransmissions. this means we get to send a "normal" packet.
+            if self.inflight.inflight() < MAX_CWND && !queues.write_stream.is_empty() {
+                let mut buffer = vec![0; MSS];
+                let n = queues.write_stream.read(&mut buffer).unwrap();
+                buffer.truncate(n);
+                let seqno = self.next_write_seqno;
+                self.next_write_seqno += 1;
+                let msg = Message::Rel {
+                    kind: RelKind::Data,
+                    stream_id: self.stream_id,
+                    seqno,
+                    payload: buffer.into(),
+                };
+                self.inflight.insert(msg.clone());
+                outgoing_callback(msg);
+
+                self.local_notify.notify_all();
+
+                log::trace!("filled window to {}", self.inflight.inflight());
             }
         }
-
-        self.global_cwnd_guess
-            .store(self.congestion.cwnd(), Ordering::SeqCst);
     }
 
     fn retick_time(&self) -> Instant {

@@ -1,6 +1,5 @@
 use arrayref::array_ref;
 
-use blake3::Hash;
 use bytes::Bytes;
 use once_cell::sync::Lazy;
 
