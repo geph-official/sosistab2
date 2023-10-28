@@ -233,7 +233,7 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
-                    self.speed += n as f64;
+                    self.speed += n as f64 / self.speed;
                     log::debug!(
                         "{n} acks received, raising speed to {:.2} KB/s",
                         self.speed * (MSS as f64) / 1000.0
