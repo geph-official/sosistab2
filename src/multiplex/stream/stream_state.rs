@@ -249,13 +249,13 @@ impl StreamState {
                     } else {
                         self.speed - self.speed_max
                     }
-                    .max(n as f64 * 3.0)
+                    .max(n as f64)
                     .min(n as f64 * 50.0);
                     log::debug!("bic_inc = {bic_inc}");
                     self.speed += bic_inc / self.speed;
                     self.speed = self
                         .speed
-                        .min(self.inflight.delivery_rate() * 1.5)
+                        .min(self.inflight.delivery_rate() * 1.2)
                         .max(old_speed);
 
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
@@ -341,7 +341,7 @@ impl StreamState {
             });
         }
 
-        const MAX_CWND: usize = 10000;
+        const MAX_CWND: usize = 1000;
 
         // every time we add another segment, we also transmit it, and set the RTO.
         let send_allowed = self.next_trans <= now;
