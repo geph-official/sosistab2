@@ -247,6 +247,7 @@ impl StreamState {
                         self.speed - self.speed_max
                     }
                     .max(n as f64 * 3.0);
+                    log::debug!("bic_inc = {bic_inc}");
                     self.speed += bic_inc / self.speed;
                     self.speed = self
                         .speed
