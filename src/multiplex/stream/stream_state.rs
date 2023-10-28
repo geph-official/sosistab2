@@ -38,6 +38,7 @@ pub struct StreamState {
     last_retrans: Instant,
     speed: f64,
     next_trans: Instant,
+    in_recovery: bool,
 
     global_cwnd_guess: Arc<AtomicUsize>,
 }
@@ -111,6 +112,7 @@ impl StreamState {
             next_write_seqno: 0,
             speed: 100.0 * 1000.0 / (MSS as f64), // 100 KB/s
             next_trans: Instant::now(),
+            in_recovery: false,
 
             additional_data,
             last_retrans: Instant::now(),
@@ -320,7 +322,10 @@ impl StreamState {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
-                    self.speed *= 0.8;
+                    if !self.in_recovery {
+                        self.speed *= 0.8;
+                        self.in_recovery = true;
+                    }
                     log::debug!("RTO retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
@@ -332,6 +337,7 @@ impl StreamState {
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             if self.inflight.inflight() < MAX_CWND && !queues.write_stream.is_empty() {
+                self.in_recovery = false;
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
                 buffer.truncate(n);
