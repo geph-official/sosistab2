@@ -109,7 +109,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: 1000.0 * 1000.0 / (MSS as f64), // 1000 KB/s
+            speed: 100.0 * 1000.0 / (MSS as f64), // 100 KB/s
             next_trans: Instant::now(),
 
             additional_data,
