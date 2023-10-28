@@ -233,11 +233,9 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
-                    self.speed += n as f64 / self.speed;
-                    log::debug!(
-                        "{n} acks received, raising speed to {:.2} KB/s",
-                        self.speed * (MSS as f64) / 1000.0
-                    );
+                    let kb_speed = self.speed * (MSS as f64) / 1000.0;
+                    self.speed += (kb_speed).powf(0.4).max(1.0) * n as f64 / self.speed;
+                    log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
@@ -321,7 +319,7 @@ impl StreamState {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
-                    self.speed = self.inflight.delivery_rate() * 0.5;
+                    self.speed = self.inflight.delivery_rate() * 0.8;
                     log::debug!("RTO retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
