@@ -239,7 +239,7 @@ impl StreamState {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
-
+                    let old_speed = self.speed;
                     // use BIC congestion control
                     let bic_inc = if self.speed < self.speed_max {
                         ((self.speed_max - self.speed) / 2.0).min(self.speed)
@@ -248,6 +248,10 @@ impl StreamState {
                     }
                     .max(n as f64 * 3.0);
                     self.speed += bic_inc / self.speed;
+                    self.speed = self
+                        .speed
+                        .min(self.inflight.delivery_rate() * 1.5)
+                        .max(old_speed);
 
                     log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
