@@ -321,6 +321,7 @@ impl StreamState {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
+                    self.speed = self.inflight.delivery_rate() * 0.5;
                     log::debug!("RTO retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);

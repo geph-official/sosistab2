@@ -163,4 +163,9 @@ impl Inflight {
     pub fn bdp(&self) -> usize {
         (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
     }
+
+    /// The estimated delivery rate of the link
+    pub fn delivery_rate(&self) -> f64 {
+        self.bw.delivery_rate()
+    }
 }
