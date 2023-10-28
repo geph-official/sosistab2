@@ -210,7 +210,7 @@ impl StreamState {
     fn tick_read(&mut self, _now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // Put all incoming packets into the reorderer.
         let mut to_ack = vec![];
-        let mut start_recovery = false;
+
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
             // This unifies flow control with congestion control at the cost of a bit of efficiency.
@@ -238,9 +238,6 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
-                    if n == 0 {
-                        start_recovery = true;
-                    }
                     let kb_speed = self.speed * (MSS as f64) / 1000.0;
 
                     // use BIC congestion control
@@ -307,9 +304,6 @@ impl StreamState {
                 seqno: self.next_unseen_seqno,
                 payload: to_ack.stdcode().into(),
             });
-        }
-        if start_recovery {
-            self.start_recovery()
         }
     }
 
