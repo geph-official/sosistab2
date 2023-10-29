@@ -314,13 +314,14 @@ impl StreamState {
         if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
             // BIC
-            let beta = 0.5;
+            let beta = 0.15;
             if self.cwnd < self.cwnd_max {
                 self.cwnd_max = self.cwnd * (2.0 - beta) / 2.0;
             } else {
                 self.cwnd_max = self.cwnd;
             }
             self.cwnd *= 1.0 - beta;
+            self.cwnd = self.cwnd.max(1.0);
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
