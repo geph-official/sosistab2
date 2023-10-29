@@ -368,7 +368,7 @@ impl StreamState {
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
-            if self.inflight.inflight() < self.inflight.bdp() * 2.max(5)
+            if self.inflight.inflight() < (self.inflight.bdp() * 2).max(5)
                 && !queues.write_stream.is_empty()
             // && !self.in_recovery
             {
