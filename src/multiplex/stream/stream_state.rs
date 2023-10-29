@@ -345,7 +345,7 @@ impl StreamState {
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
                     self.start_recovery();
-                    log::debug!("RTO retransmit {}", seqno);
+                    log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
                     self.last_retrans = now;
