@@ -159,7 +159,7 @@ async fn incoming_loop(
                     },
                 )
                 .unwrap_or_else(|e| {
-                    log::warn!("could not process message: {:?}", e);
+                    log::trace!("could not process message: {:?}", e);
                 });
 
             // send all possible replies
