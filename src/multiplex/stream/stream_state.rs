@@ -345,6 +345,12 @@ impl StreamState {
             self.start_recovery();
         }
         while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
+            log::debug!(
+                "inflight = {}, lost = {}, cwnd = {}",
+                self.inflight.inflight(),
+                self.inflight.lost(),
+                self.cwnd
+            );
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
