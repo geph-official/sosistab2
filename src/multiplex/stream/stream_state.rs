@@ -247,8 +247,8 @@ impl StreamState {
                     } else {
                         self.cwnd - self.cwnd_max
                     }
-                    .max(n as f64)
-                    .min(n as f64 * 50.0);
+                    .max(n as f64 * 0.5)
+                    .min(n as f64 * 30.0);
                     log::debug!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
