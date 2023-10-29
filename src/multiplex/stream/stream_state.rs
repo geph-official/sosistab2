@@ -372,7 +372,11 @@ impl StreamState {
                 && !queues.write_stream.is_empty()
             // && !self.in_recovery
             {
-                log::debug!("send window has grown to {}", self.inflight.inflight());
+                log::debug!(
+                    "send window has grown to {}; bdp {}",
+                    self.inflight.inflight(),
+                    self.inflight.bdp()
+                );
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
                 buffer.truncate(n);
