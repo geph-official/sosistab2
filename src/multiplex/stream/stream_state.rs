@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 8000;
+const MSS: usize = 1250;
 
 pub struct StreamState {
     phase: Phase,
@@ -249,10 +249,10 @@ impl StreamState {
                     }
                     .max(n as f64 * 0.5)
                     .min(n as f64 * 30.0);
-                    log::debug!("bic_inc = {bic_inc}");
+                    log::trace!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
-                    log::debug!("{n} acks received, increasing cwnd to {}", self.cwnd);
+                    log::trace!("{n} acks received, increasing cwnd to {}", self.cwnd);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
@@ -356,7 +356,7 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() {
-                log::debug!(
+                log::trace!(
                     "send window has grown to {}; bdp {}",
                     self.inflight.inflight(),
                     self.inflight.bdp()
