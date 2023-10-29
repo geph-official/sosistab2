@@ -341,6 +341,8 @@ impl StreamState {
             });
         }
 
+        const MAX_CWND: usize = 1000;
+
         // every time we add another segment, we also transmit it, and set the RTO.
         let send_allowed = self.next_trans <= now;
         let next_next_trans =
@@ -366,7 +368,7 @@ impl StreamState {
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
-            if self.inflight.inflight() < (self.inflight.bdp() * 2).max(2)
+            if self.inflight.inflight() < MAX_CWND
                 && !queues.write_stream.is_empty()
                 && !self.in_recovery
             {
