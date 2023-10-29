@@ -237,9 +237,6 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
-                    if n > 0 {
-                        self.in_recovery = false;
-                    }
 
                     // use BIC congestion control
                     let bic_inc = if self.cwnd < self.cwnd_max {
@@ -328,6 +325,10 @@ impl StreamState {
         }
     }
 
+    fn stop_recovery(&mut self) {
+        self.in_recovery = false;
+    }
+
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         log::trace!("tick_write for {}", self.stream_id);
         // we first handle unreliable datagrams
@@ -344,6 +345,8 @@ impl StreamState {
         // every time we add another segment, we also transmit it, and set the RTO.
         if self.inflight.lost() > 0 {
             self.start_recovery();
+        } else {
+            self.stop_recovery();
         }
         while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
             // we do any retransmissions if necessary
