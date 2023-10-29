@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 8000;
+const MSS: usize = 1200;
 
 pub struct StreamState {
     phase: Phase,
