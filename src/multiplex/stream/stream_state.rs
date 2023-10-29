@@ -314,7 +314,7 @@ impl StreamState {
         if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
             // BIC
-            let beta = 0.3;
+            let beta = 0.5;
             if self.cwnd < self.cwnd_max {
                 self.cwnd_max = self.cwnd * (2.0 - beta) / 2.0;
             } else {
