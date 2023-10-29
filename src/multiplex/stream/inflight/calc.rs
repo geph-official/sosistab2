@@ -89,12 +89,12 @@ impl BwCalculator {
             self.max_speed = delivery_rate;
             self.max_speed_time = now;
         }
-        log::debug!("current rate is {}", self.delivery_rate());
+        log::trace!("current rate is {}", self.delivery_rate());
     }
 
     /// Gets the current delivery rate
     pub fn delivery_rate(&self) -> f64 {
-        dbg!(self.max_speed)
+        self.max_speed
     }
 
     /// Gets the current delivered packets
