@@ -368,7 +368,10 @@ impl StreamState {
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
-            if self.inflight.inflight() < MAX_CWND && !queues.write_stream.is_empty() {
+            if self.inflight.inflight() < MAX_CWND
+                && !queues.write_stream.is_empty()
+                && !self.in_recovery
+            {
                 log::debug!("send window has grown to {}", self.inflight.inflight());
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
