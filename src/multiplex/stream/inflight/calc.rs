@@ -89,7 +89,7 @@ impl BwCalculator {
             self.max_speed = delivery_rate;
             self.max_speed_time = now;
         }
-        log::trace!("current rate is {}", self.delivery_rate());
+        log::debug!("current rate is {}", self.delivery_rate());
     }
 
     /// Gets the current delivery rate
