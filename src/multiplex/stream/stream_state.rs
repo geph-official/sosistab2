@@ -333,7 +333,7 @@ impl StreamState {
     }
 
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
-        log::debug!("tick_write for {}", self.stream_id);
+        log::trace!("tick_write for {}", self.stream_id);
         // we first handle unreliable datagrams
         {
             let mut queues = self.queues.lock();
