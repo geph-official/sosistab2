@@ -50,6 +50,15 @@ impl Inflight {
         self.segments.len()
     }
 
+    pub fn lost(&self) -> usize {
+        // all segments that are lost
+        let now = Instant::now();
+        self.segments
+            .values()
+            .filter(|v| v.retrans_time <= now)
+            .count()
+    }
+
     /// Mark all inflight packets less than a certain sequence number as acknowledged.
     pub fn mark_acked_lt(&mut self, seqno: Seqno) -> usize {
         let mut to_remove = vec![];

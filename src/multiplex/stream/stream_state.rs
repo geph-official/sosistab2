@@ -36,13 +36,12 @@ pub struct StreamState {
     inflight: Inflight,
     next_write_seqno: u64,
     last_retrans: Instant,
-    speed: f64,
-    speed_max: f64,
+    cwnd: f64,
+    cwnd_max: f64,
 
-    next_trans: Instant,
     in_recovery: bool,
 
-    global_speed_guess: Arc<AtomicUsize>,
+    global_cwnd_guess: Arc<AtomicUsize>,
 }
 
 impl Drop for StreamState {
@@ -112,15 +111,15 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            speed: 10.0,
-            speed_max: 0.0,
-            next_trans: Instant::now(),
+            cwnd: 10.0,
+            cwnd_max: 1.0,
+
             in_recovery: false,
 
             additional_data,
             last_retrans: Instant::now(),
 
-            global_speed_guess,
+            global_cwnd_guess: global_speed_guess,
         };
         (state, handle)
     }
@@ -241,24 +240,19 @@ impl StreamState {
                     if n > 0 {
                         self.in_recovery = false;
                     }
-                    let kb_speed = self.speed * (MSS as f64) / 1000.0;
-                    let old_speed = self.speed;
+
                     // use BIC congestion control
-                    let bic_inc = if self.speed < self.speed_max {
-                        (self.speed_max - self.speed) / 2.0
+                    let bic_inc = if self.cwnd < self.cwnd_max {
+                        (self.cwnd_max - self.cwnd) / 2.0
                     } else {
-                        self.speed - self.speed_max
+                        self.cwnd - self.cwnd_max
                     }
                     .max(n as f64)
                     .min(n as f64 * 50.0);
                     log::debug!("bic_inc = {bic_inc}");
-                    self.speed += bic_inc / self.speed;
-                    self.speed = self
-                        .speed
-                        .min(self.inflight.delivery_rate() * 1.2)
-                        .max(old_speed);
+                    self.cwnd += bic_inc / self.cwnd;
 
-                    log::debug!("{n} acks received, raising speed from {:.2} KB/s", kb_speed);
+                    log::debug!("{n} acks received, increasing cwnd to {}", self.cwnd);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
@@ -320,14 +314,14 @@ impl StreamState {
         if !self.in_recovery {
             // BIC
             let beta = 0.3;
-            if self.speed < self.speed_max {
-                self.speed_max = self.speed * (2.0 - beta) / 2.0;
+            if self.cwnd < self.cwnd_max {
+                self.cwnd_max = self.cwnd * (2.0 - beta) / 2.0;
             } else {
-                self.speed_max = self.speed;
+                self.cwnd_max = self.cwnd;
             }
-            self.speed *= 1.0 - beta;
-            self.global_speed_guess
-                .store(self.speed as usize, Ordering::Relaxed);
+            self.cwnd *= 1.0 - beta;
+            self.global_cwnd_guess
+                .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
         }
     }
@@ -345,18 +339,8 @@ impl StreamState {
             }
         }
 
-        const MAX_CWND: usize = 1000;
-
         // every time we add another segment, we also transmit it, and set the RTO.
-        let send_allowed = self.next_trans <= now;
-        let next_next_trans =
-            (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
-        if send_allowed {
-            log::trace!(
-                "send_allowed because we are {:?} since next_trans; {:?} since next_next_trans",
-                now.saturating_duration_since(self.next_trans),
-                now.saturating_duration_since(next_next_trans)
-            );
+        while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -365,8 +349,7 @@ impl StreamState {
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
                     self.last_retrans = now;
-                    self.next_trans = next_next_trans;
-                    return;
+                    continue;
                 }
             }
 
@@ -398,22 +381,15 @@ impl StreamState {
                 self.local_notify.notify_all();
 
                 log::trace!("filled window to {}", self.inflight.inflight());
-                self.next_trans = next_next_trans;
             }
         }
     }
 
     fn retick_time(&self) -> Instant {
-        let first_rto = self
-            .inflight
+        self.inflight
             .first_rto()
             .map(|s| s.1)
-            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000));
-        if self.queues.lock().write_stream.is_empty() || self.in_recovery {
-            first_rto.max(self.next_trans)
-        } else {
-            first_rto.min(self.next_trans)
-        }
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
     }
 }
 
