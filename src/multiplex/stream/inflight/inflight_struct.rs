@@ -146,8 +146,8 @@ impl Inflight {
                 let old_retrans = entry.retrans_time;
                 entry.retrans += 1;
 
-                entry.retrans_time = Instant::now()
-                    + dbg!(rto.mul_f64(2.0f64.powi(dbg!(entry.retrans) as i32).min(60.0)));
+                entry.retrans_time =
+                    Instant::now() + rto.mul_f64(2.0f64.powi(entry.retrans as i32).min(60.0));
 
                 (entry.payload.clone(), old_retrans, entry.retrans_time)
             })?
@@ -178,7 +178,7 @@ impl Inflight {
 
     /// The total bdp of the link, in packets
     pub fn bdp(&self) -> usize {
-        (dbg!(self.bw.delivery_rate()) * dbg!(self.rtt.min_rtt().as_secs_f64())) as usize
+        (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
     }
 
     /// The estimated delivery rate of the link
