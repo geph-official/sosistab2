@@ -335,11 +335,14 @@ impl StreamState {
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         log::debug!("tick_write for {}", self.stream_id);
         // we first handle unreliable datagrams
-        while let Some(payload) = self.queues.lock().send_urel.pop_front() {
-            outgoing_callback(Message::Urel {
-                stream_id: self.stream_id,
-                payload,
-            });
+        {
+            let mut queues = self.queues.lock();
+            while let Some(payload) = queues.send_urel.pop_front() {
+                outgoing_callback(Message::Urel {
+                    stream_id: self.stream_id,
+                    payload,
+                });
+            }
         }
 
         const MAX_CWND: usize = 1000;
