@@ -340,7 +340,7 @@ impl StreamState {
         }
 
         // every time we add another segment, we also transmit it, and set the RTO.
-        while self.inflight.inflight() - self.inflight.lost() <= self.cwnd as usize {
+        while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -355,8 +355,7 @@ impl StreamState {
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
-            if self.inflight.inflight() < (self.inflight.bdp() * 5).max(10)
-                && !queues.write_stream.is_empty()
+            if !queues.write_stream.is_empty()
             // && !self.in_recovery
             {
                 log::debug!(
