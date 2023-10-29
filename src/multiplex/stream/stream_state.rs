@@ -401,7 +401,7 @@ impl StreamState {
     }
 
     fn retick_time(&self) -> Instant {
-        Instant::now() + Duration::from_millis(1)
+        Instant::now() + Duration::from_millis(10)
         // let first_rto = self
         //     .inflight
         //     .first_rto()
