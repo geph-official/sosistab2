@@ -340,7 +340,7 @@ impl StreamState {
         }
 
         // every time we add another segment, we also transmit it, and set the RTO.
-        while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
+        while self.inflight.inflight() - self.inflight.lost() <= self.cwnd as usize {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
