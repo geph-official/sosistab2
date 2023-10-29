@@ -356,7 +356,7 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() {
-                log::trace!(
+                log::debug!(
                     "send window has grown to {}; bdp {}",
                     self.inflight.inflight(),
                     self.inflight.bdp()
