@@ -182,7 +182,7 @@ async fn tick_loop(
     loop {
         let start = Instant::now();
         next_tick = state.lock().tick(|msg| send_queue.push(msg));
-        eprintln!("tick took {:?}", start.elapsed());
+        log::trace!("tick took {:?}", start.elapsed());
         // transmit all the queue
         for msg in send_queue.drain(..) {
             pipe_pool.send(msg.stdcode().into()).await;
