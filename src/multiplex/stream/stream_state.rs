@@ -312,6 +312,7 @@ impl StreamState {
 
     fn start_recovery(&mut self) {
         if !self.in_recovery {
+            log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
             // BIC
             let beta = 0.3;
             if self.cwnd < self.cwnd_max {
@@ -340,11 +341,13 @@ impl StreamState {
         }
 
         // every time we add another segment, we also transmit it, and set the RTO.
+        if self.inflight.lost() > 0 {
+            self.start_recovery();
+        }
         while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
-                    self.start_recovery();
                     log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
