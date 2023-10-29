@@ -407,7 +407,7 @@ impl StreamState {
             .first_rto()
             .map(|s| s.1)
             .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000));
-        if self.queues.lock().write_stream.is_empty() {
+        if self.queues.lock().write_stream.is_empty() || self.in_recovery {
             first_rto.max(self.next_trans)
         } else {
             first_rto.min(self.next_trans)

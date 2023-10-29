@@ -1,11 +1,7 @@
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
-use std::{
-    any::Any,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use concurrent_queue::ConcurrentQueue;
 
@@ -187,8 +183,9 @@ async fn tick_loop(
         }
         // // sleep 1ms first to prevent too aggressively looping around
         // // this is also the basis for the brand of delayed-ack handling we do
-
-        timer.set_at(next_tick.max(Instant::now() + Duration::from_millis(1)));
+        // timer.set_at(Instant::now() + Duration::from_millis(1));
+        // (&mut timer).await;
+        timer.set_at(next_tick);
         // horrifying hax
         async {
             stream_update.wait().await;
