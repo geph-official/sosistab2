@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 30000;
+const MSS: usize = 8000;
 
 pub struct StreamState {
     phase: Phase,
@@ -348,7 +348,7 @@ impl StreamState {
         const MAX_CWND: usize = 1000;
 
         // every time we add another segment, we also transmit it, and set the RTO.
-        let send_allowed = self.next_trans <= now || true;
+        let send_allowed = self.next_trans <= now;
         let next_next_trans =
             (self.next_trans + Duration::from_secs_f64(1.0 / self.speed)).max(now);
         if send_allowed {
