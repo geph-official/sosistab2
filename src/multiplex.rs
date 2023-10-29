@@ -1,7 +1,11 @@
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
-use std::{any::Any, sync::Arc, time::Duration};
+use std::{
+    any::Any,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use concurrent_queue::ConcurrentQueue;
 
@@ -176,7 +180,9 @@ async fn tick_loop(
     let mut next_tick;
     let mut send_queue = vec![];
     loop {
+        let start = Instant::now();
         next_tick = state.lock().tick(|msg| send_queue.push(msg));
+        eprintln!("tick took {:?}", start.elapsed());
         // transmit all the queue
         for msg in send_queue.drain(..) {
             pipe_pool.send(msg.stdcode().into()).await;
