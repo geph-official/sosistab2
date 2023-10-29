@@ -94,7 +94,7 @@ impl BwCalculator {
 
     /// Gets the current delivery rate
     pub fn delivery_rate(&self) -> f64 {
-        self.max_speed
+        dbg!(self.max_speed)
     }
 
     /// Gets the current delivered packets
