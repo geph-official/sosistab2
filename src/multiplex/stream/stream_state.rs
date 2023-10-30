@@ -402,14 +402,17 @@ impl StreamState {
         }
     }
 
-    fn retick_time(&self, now: Instant) -> Instant {
-        let next = self
-            .inflight
-            .first_rto()
-            .map(|s| s.1)
-            .unwrap_or_else(|| now + Duration::from_secs(1000));
-        log::debug!("reticking in {:?}", next.saturating_duration_since(now));
-        next
+    fn retick_time(&self, now: Instant) -> Option<Instant> {
+        if self.congested() {
+            let need_packets_lost =
+                (self.inflight.inflight() - self.inflight.lost()) + 1 - self.cwnd as usize;
+            log::debug!("need {need_packets_lost} lost before we're good to go");
+            self.inflight.time_when_n_lost(need_packets_lost)
+        } else {
+            let next = self.inflight.first_rto().map(|s| s.1)?;
+            log::debug!("reticking in {:?}", next.saturating_duration_since(now));
+            Some(next)
+        }
     }
 }
 

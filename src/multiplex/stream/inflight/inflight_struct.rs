@@ -149,6 +149,15 @@ impl Inflight {
             .map(|(instant, seqno)| (seqno[0], *instant))
     }
 
+    /// Returns the amount of time required before this many packets are lost.
+    pub fn time_when_n_lost(&self, n: usize) -> Option<Instant> {
+        self.rtos
+            .iter()
+            .flat_map(|(rto, v)| v.iter().map(|_| *rto))
+            .take(n)
+            .max()
+    }
+
     /// Retransmits a particular seqno, clearing the "known lost" flag on the way.
     pub fn retransmit(&mut self, seqno: Seqno) -> Option<Message> {
         let rto = self.rtt.rto();
