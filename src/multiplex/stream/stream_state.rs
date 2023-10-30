@@ -188,7 +188,7 @@ impl StreamState {
                     self.phase = Phase::Closed;
                 }
                 // Finally, calculate the next interval.
-                Some(self.retick_time(now))
+                self.retick_time(now)
             }
             Phase::Closed => {
                 self.queues.lock().closed = true;
