@@ -19,6 +19,7 @@ use smol::{
     future::FutureExt,
     Task,
 };
+use smol_timeout::TimeoutExt;
 use smolscale::immortal::Immortal;
 
 use crate::{MuxPublic, Pipe};
@@ -185,36 +186,49 @@ pub struct PipePool {
     selected_send_pipe: Arc<Mutex<Option<Arc<dyn Pipe>>>>,
     last_recv_pipe: Mutex<Option<Arc<dyn Pipe>>>,
 
+    last_significant_recv_time: Arc<RwLock<Instant>>,
+
     naive_send: bool,
 
     _stats_gatherer: Immortal,
 }
 
 async fn stats_gatherer_loop(
+    last_recv_time: Arc<RwLock<Instant>>,
     selected_send_pipe: Arc<Mutex<Option<Arc<dyn Pipe>>>>,
     pipes: Arc<RwLock<VecDeque<SinglePipe>>>,
 ) -> Infallible {
     smol::Timer::after(Duration::from_secs(5)).await;
     loop {
-        let mut ping_gatherer = FuturesUnordered::new();
-        {
-            let pipes = pipes.read();
-            for pipe in pipes.iter() {
-                let pipe = pipe.clone();
-                ping_gatherer.push(async move {
-                    let ping = pipe.measure_ping().await;
-                    (pipe, ping)
-                })
-            }
+        // wait until we're chill
+        while last_recv_time.read().elapsed() < Duration::from_secs(1) {
+            log::warn!("waiting for chillness before pinging");
+            smol::Timer::after(Duration::from_secs(1)).await;
         }
-        if let Some((best, ping)) = ping_gatherer.next().await {
-            log::warn!(
-                "picked best pipe {}/{} with ping {:?}",
-                best.pipe.protocol(),
-                best.pipe.peer_addr(),
-                ping
-            );
-            *selected_send_pipe.lock() = Some(best.pipe.clone());
+        let measure = async {
+            let mut ping_gatherer = FuturesUnordered::new();
+            {
+                let pipes = pipes.read();
+                for pipe in pipes.iter() {
+                    let pipe = pipe.clone();
+                    ping_gatherer.push(async move {
+                        let ping = pipe.measure_ping().await;
+                        (pipe, ping)
+                    })
+                }
+            }
+            if let Some((best, ping)) = ping_gatherer.next().await {
+                log::warn!(
+                    "picked best pipe {}/{} with ping {:?}",
+                    best.pipe.protocol(),
+                    best.pipe.peer_addr(),
+                    ping
+                );
+                *selected_send_pipe.lock() = Some(best.pipe.clone());
+            }
+        };
+        if measure.timeout(Duration::from_secs(30)).await.is_none() {
+            log::warn!("pinging all pipes timed out!")
         }
         smol::Timer::after(Duration::from_secs(60)).await;
     }
@@ -226,6 +240,7 @@ impl PipePool {
         let (send_incoming, recv_incoming) = smol::channel::bounded(1);
         let pipes = Arc::new(RwLock::new(VecDeque::new()));
         let selected_send_pipe: Arc<Mutex<Option<Arc<dyn Pipe>>>> = Default::default();
+        let last_significant_recv_time = Arc::new(RwLock::new(Instant::now()));
         Self {
             pipes: pipes.clone(),
             size_limit,
@@ -235,11 +250,16 @@ impl PipePool {
             selected_send_pipe: selected_send_pipe.clone(),
             last_recv_pipe: Default::default(),
             naive_send,
+            last_significant_recv_time: last_significant_recv_time.clone(),
 
             _stats_gatherer: if naive_send {
                 Immortal::spawn(smol::future::pending())
             } else {
-                Immortal::spawn(stats_gatherer_loop(selected_send_pipe, pipes))
+                Immortal::spawn(stats_gatherer_loop(
+                    last_significant_recv_time,
+                    selected_send_pipe,
+                    pipes,
+                ))
             },
         }
     }
@@ -318,6 +338,10 @@ impl PipePool {
     pub async fn recv(&self) -> anyhow::Result<Bytes> {
         let (ret, pipe) = self.recv_incoming.recv().await?;
         *self.last_recv_pipe.lock() = Some(pipe);
+        // on average, we update the recv time every 100 KB of reads
+        if fastrand::f64() < 0.01 * (ret.len() as f64 / 1000.0) {
+            *self.last_significant_recv_time.write() = Instant::now();
+        }
         Ok(ret)
     }
 }
