@@ -14,8 +14,6 @@ use std::{
     task::Poll,
 };
 
-mod congestion;
-
 mod inflight;
 pub mod stream_state;
 

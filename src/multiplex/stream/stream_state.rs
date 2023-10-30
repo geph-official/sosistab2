@@ -188,7 +188,7 @@ impl StreamState {
                     self.phase = Phase::Closed;
                 }
                 // Finally, calculate the next interval.
-                Some(self.retick_time())
+                Some(self.retick_time(now))
             }
             Phase::Closed => {
                 self.queues.lock().closed = true;
@@ -329,6 +329,10 @@ impl StreamState {
         self.in_recovery = false;
     }
 
+    fn congested(&self) -> bool {
+        self.inflight.inflight() - self.inflight.lost() >= self.cwnd as usize
+    }
+
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         log::trace!("tick_write for {}", self.stream_id);
         // we first handle unreliable datagrams
@@ -348,7 +352,7 @@ impl StreamState {
         } else {
             self.stop_recovery();
         }
-        while self.inflight.inflight() - self.inflight.lost() < self.cwnd as usize {
+        while !self.congested() {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -398,11 +402,14 @@ impl StreamState {
         }
     }
 
-    fn retick_time(&self) -> Instant {
-        self.inflight
+    fn retick_time(&self, now: Instant) -> Instant {
+        let next = self
+            .inflight
             .first_rto()
             .map(|s| s.1)
-            .unwrap_or_else(|| Instant::now() + Duration::from_secs(1000))
+            .unwrap_or_else(|| now + Duration::from_secs(1000));
+        log::debug!("reticking in {:?}", next.saturating_duration_since(now));
+        next
     }
 }
 
