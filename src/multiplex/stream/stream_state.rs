@@ -404,8 +404,8 @@ impl StreamState {
 
     fn retick_time(&self, now: Instant) -> Instant {
         let next = if self.congested() {
-            let need_packets_lost =
-                (self.inflight.inflight() - self.inflight.lost()) + 2 - self.cwnd as usize;
+            let need_packets_lost = dbg!(self.inflight.inflight()) - dbg!(self.inflight.lost()) + 2
+                - dbg!(self.cwnd) as usize;
             log::debug!("need {need_packets_lost} lost before we're good to go");
             self.inflight.time_when_n_lost(need_packets_lost)
         } else {
