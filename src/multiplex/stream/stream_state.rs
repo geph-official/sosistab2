@@ -111,7 +111,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 1.0,
+            cwnd: 2.0,
             cwnd_max: 0.0,
 
             in_recovery: false,
@@ -318,7 +318,7 @@ impl StreamState {
                 self.cwnd_max = self.cwnd;
             }
             self.cwnd *= 1.0 - beta;
-            self.cwnd = self.cwnd.max(1.0);
+            self.cwnd = self.cwnd.max(2.0);
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
