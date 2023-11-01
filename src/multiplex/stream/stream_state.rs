@@ -236,7 +236,15 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    // then, we interpret the payload as a vector of acks that should additional be taken care of.
+                    if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
+                        for sack in sacks {
+                            if self.inflight.mark_acked(sack) {
+                                n += 1
+                            }
+                        }
+                    }
 
                     // use BIC congestion control
                     let bic_inc = if self.cwnd < self.cwnd_max {
@@ -249,13 +257,7 @@ impl StreamState {
                     log::trace!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
-                    log::trace!("{n} acks received, increasing cwnd to {}", self.cwnd);
-                    // then, we interpret the payload as a vector of acks that should additional be taken care of.
-                    if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
-                        for sack in sacks {
-                            self.inflight.mark_acked(sack);
-                        }
-                    }
+                    log::debug!("{n} acks received, increasing cwnd to {}", self.cwnd);
                 }
                 Message::Rel {
                     kind: RelKind::Syn,
@@ -374,7 +376,7 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() {
-                log::debug!(
+                log::trace!(
                     "send window has grown to {}; cwnd {:.1}; bdp {}",
                     self.inflight.inflight(),
                     self.cwnd,
