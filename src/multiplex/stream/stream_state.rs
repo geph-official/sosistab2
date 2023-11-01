@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 12000;
+const MSS: usize = 1200;
 
 pub struct StreamState {
     phase: Phase,
@@ -317,6 +317,7 @@ impl StreamState {
             } else {
                 self.cwnd_max = self.cwnd;
             }
+            self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
             self.cwnd *= 1.0 - beta;
             self.cwnd = self.cwnd.max(2.0);
             self.global_cwnd_guess
@@ -374,8 +375,9 @@ impl StreamState {
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() {
                 log::debug!(
-                    "send window has grown to {}; bdp {}",
+                    "send window has grown to {}; cwnd {:.1}; bdp {}",
                     self.inflight.inflight(),
+                    self.cwnd,
                     self.inflight.bdp()
                 );
                 let mut buffer = vec![0; MSS];
