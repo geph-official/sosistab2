@@ -259,7 +259,7 @@ impl StreamState {
 
                     // use HSTCP
                     let incr = self.cwnd.powf(0.4).max(1.0);
-                    self.cwnd += incr;
+                    self.cwnd += incr / self.cwnd;
 
                     log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
                 }
