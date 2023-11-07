@@ -329,7 +329,7 @@ impl StreamState {
 
             // HSTCP
             self.cwnd *= 0.5;
-            // self.cwnd = self.cwnd.max(self.inflight.bdp() * 0.8);
+            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * 0.5);
 
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
