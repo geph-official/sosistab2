@@ -330,7 +330,7 @@ impl StreamState {
             // HSTCP
             let factor = 0.75;
             self.cwnd *= factor;
-            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor);
+            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
 
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
