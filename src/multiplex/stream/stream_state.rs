@@ -111,7 +111,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 10.0,
+            cwnd: global_speed_guess.load(Ordering::SeqCst) as f64,
             cwnd_max: global_speed_guess.load(Ordering::SeqCst) as f64,
 
             in_recovery: false,
@@ -328,8 +328,9 @@ impl StreamState {
             // self.cwnd = self.cwnd.max(2.0);
 
             // HSTCP
-            self.cwnd *= 0.5;
-            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * 0.5);
+            let factor = 0.75;
+            self.cwnd *= factor;
+            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor);
 
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
