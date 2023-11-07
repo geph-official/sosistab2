@@ -247,19 +247,19 @@ impl StreamState {
                     }
 
                     // use BIC congestion control
-                    let bic_inc = if self.cwnd < self.cwnd_max {
-                        (self.cwnd_max - self.cwnd) / 2.0
-                    } else {
-                        self.cwnd - self.cwnd_max
-                    }
-                    .max(n as f64 * 0.5)
-                    .min(n as f64 * 32.0);
-                    log::trace!("bic_inc = {bic_inc}");
-                    self.cwnd += bic_inc / self.cwnd;
+                    // let bic_inc = if self.cwnd < self.cwnd_max {
+                    //     (self.cwnd_max - self.cwnd) / 2.0
+                    // } else {
+                    //     self.cwnd - self.cwnd_max
+                    // }
+                    // .max(n as f64 * 0.5)
+                    // .min(n as f64 * 32.0);
+                    // log::trace!("bic_inc = {bic_inc}");
+                    // self.cwnd += bic_inc / self.cwnd;
 
                     // use HSTCP
-                    // let incr = self.cwnd.powf(0.4).max(1.0);
-                    // self.cwnd += incr / self.cwnd;
+                    let incr = self.cwnd.powf(0.4).max(1.0);
+                    self.cwnd += incr / self.cwnd;
 
                     log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
                 }
