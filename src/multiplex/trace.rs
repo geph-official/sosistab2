@@ -12,7 +12,7 @@ pub fn trace_outgoing_msg(msg: &Message) {
             let mut file =
                 File::create(&fname).expect("cannot create file for SOSISTAB_TRACE_OUTGOING");
             writeln!(file, "time,kind,stream_id,seqno,payload_len").unwrap();
-            Some(File::create(&fname).expect("cannot create file for SOSISTAB_TRACE_OUTGOING"))
+            Some(file)
         } else {
             None
         }
@@ -43,7 +43,7 @@ pub fn trace_incoming_msg(msg: &Message) {
             let mut file =
                 File::create(&fname).expect("cannot create file for SOSISTAB_TRACE_INCOMING");
             writeln!(file, "time,kind,stream_id,seqno,payload_len").unwrap();
-            Some(File::create(&fname).expect("cannot create file for SOSISTAB_TRACE_INCOMING"))
+            Some(file)
         } else {
             None
         }
