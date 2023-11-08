@@ -260,6 +260,12 @@ impl StreamState {
                     // self.cwnd += incr / self.cwnd;
 
                     log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
+                    log::debug!(
+                        "send window {}; cwnd {:.1}; bdp {}",
+                        self.inflight.inflight(),
+                        self.cwnd,
+                        self.inflight.bdp()
+                    );
                 }
                 Message::Rel {
                     kind: RelKind::Syn,
@@ -384,12 +390,6 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() {
-                log::debug!(
-                    "send window has grown to {}; cwnd {:.1}; bdp {}",
-                    self.inflight.inflight(),
-                    self.cwnd,
-                    self.inflight.bdp()
-                );
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
                 buffer.truncate(n);
