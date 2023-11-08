@@ -252,7 +252,7 @@ impl StreamState {
                     }
                     .max(n as f64 * 0.5)
                     .min(n as f64 * n as f64);
-                    log::trace!("bic_inc = {bic_inc}");
+                    log::debug!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
                     // use HSTCP
