@@ -47,7 +47,7 @@ impl RttCalculator {
 
     pub fn rto(&self) -> Duration {
         (self.estimated_rtt + Duration::from_secs_f64(4.0 * self.dev_rtt.as_secs_f64()))
-            + Duration::from_millis(500)
+            + Duration::from_millis(150)
     }
 
     pub fn min_rtt(&self) -> Duration {

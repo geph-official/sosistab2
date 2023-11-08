@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 1000;
+const MSS: usize = 9000;
 
 pub struct StreamState {
     phase: Phase,
@@ -111,8 +111,8 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: global_speed_guess.load(Ordering::SeqCst) as f64,
-            cwnd_max: global_speed_guess.load(Ordering::SeqCst) as f64,
+            cwnd: 3.0,
+            cwnd_max: 0.0,
 
             in_recovery: false,
 
@@ -247,19 +247,19 @@ impl StreamState {
                     }
 
                     // use BIC congestion control
-                    // let bic_inc = if self.cwnd < self.cwnd_max {
-                    //     (self.cwnd_max - self.cwnd) / 2.0
-                    // } else {
-                    //     self.cwnd - self.cwnd_max
-                    // }
-                    // .max(n as f64 * 0.5)
-                    // .min(n as f64 * 100.0);
-                    // log::trace!("bic_inc = {bic_inc}");
-                    // self.cwnd += bic_inc / self.cwnd;
+                    let bic_inc = if self.cwnd < self.cwnd_max {
+                        (self.cwnd_max - self.cwnd) / 2.0
+                    } else {
+                        self.cwnd - self.cwnd_max
+                    }
+                    .max(n as f64 * 0.5)
+                    .min(n as f64 * 100.0);
+                    log::trace!("bic_inc = {bic_inc}");
+                    self.cwnd += bic_inc / self.cwnd;
 
                     // use HSTCP
-                    let incr = self.cwnd.powf(0.4).max(1.0);
-                    self.cwnd += incr / self.cwnd;
+                    // let incr = self.cwnd.powf(0.4).max(1.0);
+                    // self.cwnd += incr / self.cwnd;
 
                     log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
                 }
@@ -317,20 +317,20 @@ impl StreamState {
         if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
             // BIC
-            // let beta = 0.15;
-            // if self.cwnd < self.cwnd_max {
-            //     self.cwnd_max = self.cwnd * (2.0 - beta) / 2.0;
-            // } else {
-            //     self.cwnd_max = self.cwnd;
-            // }
-            // self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
-            // self.cwnd *= 1.0 - beta;
-            // self.cwnd = self.cwnd.max(2.0);
+            let beta = 0.15;
+            if self.cwnd < self.cwnd_max {
+                self.cwnd_max = self.cwnd * (2.0 - beta) / 2.0;
+            } else {
+                self.cwnd_max = self.cwnd;
+            }
+            self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
+            self.cwnd *= 1.0 - beta;
+            self.cwnd = self.cwnd.max(2.0);
 
             // HSTCP
-            let factor = 0.75;
-            self.cwnd *= factor;
-            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
+            // let factor = 0.75;
+            // self.cwnd *= factor;
+            // self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
 
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
