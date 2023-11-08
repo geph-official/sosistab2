@@ -16,7 +16,10 @@ use stdcode::StdcodeSerializeExt;
 
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
-    multiplex::pipe_pool::RelKind,
+    multiplex::{
+        pipe_pool::RelKind,
+        trace::{trace_incoming_msg, trace_outgoing_msg},
+    },
     MuxPublic, MuxSecret, MuxStream,
 };
 
@@ -72,6 +75,7 @@ impl MultiplexState {
         // encryption
         let mut outgoing_callback = |msg: Message| {
             log::trace!("send in tick {:?}", msg);
+            trace_outgoing_msg(&msg);
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
                 raw_callback(OuterMessage::EncryptedMsg { inner })
@@ -191,6 +195,7 @@ impl MultiplexState {
                 let inner: Message =
                     stdcode::deserialize(&inner).context("could not deserialize message")?;
                 log::trace!("recv {:?}", inner);
+                trace_incoming_msg(&inner);
                 match &inner {
                     Message::Rel {
                         kind: RelKind::Syn,

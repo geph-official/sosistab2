@@ -1,6 +1,7 @@
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
+mod trace;
 use std::{
     any::Any,
     sync::Arc,
