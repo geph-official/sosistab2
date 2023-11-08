@@ -261,9 +261,10 @@ impl StreamState {
 
                     log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
                     log::debug!(
-                        "send window {}; cwnd {:.1}; bdp {}",
+                        "send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}",
                         self.inflight.inflight(),
                         self.cwnd,
+                        self.cwnd_max,
                         self.inflight.bdp()
                     );
                 }
