@@ -187,11 +187,9 @@ async fn tick_loop(
         for msg in send_queue.drain(..) {
             pipe_pool.send(msg.stdcode().into()).await;
         }
-        // // sleep 1ms first to prevent too aggressively looping around
-        // // this is also the basis for the brand of delayed-ack handling we do
-        // timer.set_at(Instant::now() + Duration::from_millis(1));
-        // (&mut timer).await;
-        timer.set_at(next_tick.max(Instant::now() + Duration::from_millis(1)));
+        // sleep first to prevent too aggressively looping around
+        // this is also the basis for the brand of delayed-ack handling we do
+        timer.set_at(next_tick.max(Instant::now() + Duration::from_millis(5)));
         // horrifying hax
         async {
             stream_update.wait().await;
