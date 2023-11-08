@@ -111,7 +111,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 3.0,
+            cwnd: 1.0,
             cwnd_max: 0.0,
 
             in_recovery: false,
@@ -236,13 +236,11 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
-                            if self.inflight.mark_acked(sack) {
-                                n += 1
-                            }
+                            self.inflight.mark_acked(sack);
                         }
                     }
 
@@ -253,7 +251,7 @@ impl StreamState {
                         self.cwnd - self.cwnd_max
                     }
                     .max(n as f64 * 0.5)
-                    .min(n as f64 * 100.0);
+                    .min(n as f64 * n as f64);
                     log::trace!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
@@ -325,7 +323,7 @@ impl StreamState {
             }
             self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
             self.cwnd *= 1.0 - beta;
-            self.cwnd = self.cwnd.max(2.0);
+            self.cwnd = self.cwnd.max(1.0);
 
             // HSTCP
             // let factor = 0.75;
