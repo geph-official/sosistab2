@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, StreamQueues};
-const MSS: usize = 10000;
+const MSS: usize = 1000;
 
 pub struct StreamState {
     phase: Phase,
@@ -304,10 +304,11 @@ impl StreamState {
         for (seqno, packet) in self.reorderer.take() {
             self.next_unseen_seqno = seqno + 1;
             self.queues.lock().read_stream.write_all(&packet).unwrap();
-            self.local_notify.notify_all();
         }
+
         // Then, generate an ack.
         if !to_ack.is_empty() {
+            self.local_notify.notify_all();
             to_ack.retain(|a| a >= &self.next_unseen_seqno);
             outgoing_callback(Message::Rel {
                 kind: RelKind::DataAck,
