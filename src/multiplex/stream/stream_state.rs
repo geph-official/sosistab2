@@ -254,7 +254,7 @@ impl StreamState {
                             self.cwnd - self.cwnd_max
                         }
                         .max(self.cwnd.powf(0.4).max(1.0))
-                        .min(50.0);
+                        .min(500.0);
                         self.cwnd += bic_inc / self.cwnd;
                     }
 
