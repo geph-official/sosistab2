@@ -422,7 +422,7 @@ impl StreamState {
                 self.local_notify.notify_all();
                 self.last_write_time = now;
                 log::debug!("filled window to {}", self.inflight.inflight());
-                writes_allowed -= 1;
+                // writes_allowed -= 1;
                 continue;
             }
 
