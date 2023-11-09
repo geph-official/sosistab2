@@ -250,7 +250,7 @@ impl StreamState {
                     } else {
                         self.cwnd - self.cwnd_max
                     }
-                    .max(self.cwnd.powf(0.4).max(1.0))
+                    .max(n as f64 * self.cwnd.powf(0.4).max(1.0))
                     .min(n as f64 * 64.0);
                     log::trace!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
@@ -259,9 +259,8 @@ impl StreamState {
                     // let incr = self.cwnd.powf(0.4).max(1.0);
                     // self.cwnd += incr / self.cwnd;
 
-                    log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
                     log::debug!(
-                        "send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}",
+                        "n = {n}; send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}",
                         self.inflight.inflight(),
                         self.cwnd,
                         self.cwnd_max,
