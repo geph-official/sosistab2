@@ -209,7 +209,7 @@ impl StreamState {
     fn tick_read(&mut self, _now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // Put all incoming packets into the reorderer.
         let mut to_ack = vec![];
-
+        log::debug!("processing incoming queue of {}", self.incoming_queue.len());
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
             // This unifies flow control with congestion control at the cost of a bit of efficiency.
@@ -251,7 +251,7 @@ impl StreamState {
                         } else {
                             self.cwnd - self.cwnd_max
                         }
-                        .max(self.cwnd.powf(0.4).max(1.0))
+                        .max(1.0)
                         .min(50.0);
                         self.cwnd += bic_inc / self.cwnd;
                     }
