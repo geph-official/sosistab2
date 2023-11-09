@@ -374,11 +374,11 @@ impl StreamState {
             self.stop_recovery();
         }
 
-        // hardcoded 100/s
+        // hardcoded speed limit
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
             .as_secs_f64()
-            * 100.0) as usize;
+            * 10.0) as usize;
 
         while !self.congested() && writes_allowed > 0 {
             writes_allowed -= 1;
