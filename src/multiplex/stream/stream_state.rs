@@ -409,7 +409,7 @@ impl StreamState {
 
                 self.local_notify.notify_all();
 
-                log::trace!("filled window to {}", self.inflight.inflight());
+                log::debug!("filled window to {}", self.inflight.inflight());
                 continue;
             }
 
