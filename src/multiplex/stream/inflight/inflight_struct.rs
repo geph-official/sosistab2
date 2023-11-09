@@ -79,25 +79,25 @@ impl Inflight {
 
     /// Marks a particular inflight packet as acknowledged. Returns whether or not there was actually such an inflight packet.
     pub fn mark_acked(&mut self, acked_seqno: Seqno) -> bool {
-        let mut to_remove = None;
-        let now_rto = Instant::now();
-        if let Some((first_seqno, first_entry)) = self.segments.iter_mut().next() {
-            if acked_seqno > first_seqno + 5
-                && first_entry.retrans == 0
-                && first_entry.retrans_time > now_rto
-            {
-                log::debug!(
-                    "fast retransmit triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
-                );
-                to_remove = Some((first_entry.retrans_time, *first_seqno));
-                first_entry.retrans_time = now_rto;
-                self.rtos.entry(now_rto).or_default().push(*first_seqno);
-            }
-        }
+        // let mut to_remove = None;
+        // let now_rto = Instant::now();
+        // if let Some((first_seqno, first_entry)) = self.segments.iter_mut().next() {
+        //     if acked_seqno > first_seqno + 5
+        //         && first_entry.retrans == 0
+        //         && first_entry.retrans_time > now_rto
+        //     {
+        //         log::debug!(
+        //             "fast retransmit triggered, acked_seqno = {acked_seqno}; first_seqno = {first_seqno}"
+        //         );
+        //         to_remove = Some((first_entry.retrans_time, *first_seqno));
+        //         first_entry.retrans_time = now_rto;
+        //         self.rtos.entry(now_rto).or_default().push(*first_seqno);
+        //     }
+        // }
 
-        if let Some((a, b)) = to_remove {
-            self.remove_rto(a, b)
-        }
+        // if let Some((a, b)) = to_remove {
+        //     self.remove_rto(a, b)
+        // }
 
         let now = Instant::now();
 
