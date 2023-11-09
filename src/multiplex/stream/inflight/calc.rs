@@ -32,17 +32,17 @@ impl RttCalculator {
             self.min_rtt = sample;
             self.min_rtt_time = now;
         }
-        if now.saturating_duration_since(self.rtt_time) > self.estimated_rtt {
-            // Update EstimatedRTT and DevRTT
-            self.estimated_rtt = Duration::from_secs_f64(
-                (1.0 - alpha) * self.estimated_rtt.as_secs_f64() + alpha * sample.as_secs_f64(),
-            );
-            self.dev_rtt = Duration::from_secs_f64(
-                (1.0 - beta) * self.dev_rtt.as_secs_f64()
-                    + beta * (sample.as_secs_f64() - self.estimated_rtt.as_secs_f64()).abs(),
-            );
-            self.rtt_time = now;
-        }
+        // if now.saturating_duration_since(self.rtt_time) > self.estimated_rtt {
+        // Update EstimatedRTT and DevRTT
+        self.estimated_rtt = Duration::from_secs_f64(
+            (1.0 - alpha) * self.estimated_rtt.as_secs_f64() + alpha * sample.as_secs_f64(),
+        );
+        self.dev_rtt = Duration::from_secs_f64(
+            (1.0 - beta) * self.dev_rtt.as_secs_f64()
+                + beta * (sample.as_secs_f64() - self.estimated_rtt.as_secs_f64()).abs(),
+        );
+        self.rtt_time = now;
+        // }
     }
 
     pub fn rto(&self) -> Duration {
