@@ -35,11 +35,11 @@ pub struct StreamState {
     // write variables
     inflight: Inflight,
     next_write_seqno: u64,
-    last_retrans: Instant,
+    last_retrans_time: Instant,
     cwnd: f64,
     cwnd_max: f64,
-
     in_recovery: bool,
+    last_write_time: Instant,
 
     global_cwnd_guess: Arc<AtomicUsize>,
 }
@@ -117,7 +117,8 @@ impl StreamState {
             in_recovery: false,
 
             additional_data,
-            last_retrans: Instant::now(),
+            last_retrans_time: Instant::now(),
+            last_write_time: Instant::now(),
 
             global_cwnd_guess: global_speed_guess,
         };
@@ -372,7 +373,15 @@ impl StreamState {
         } else {
             self.stop_recovery();
         }
-        while !self.congested() {
+
+        // hardcoded 100/s
+        let mut writes_allowed = (now
+            .saturating_duration_since(self.last_write_time)
+            .as_secs_f64()
+            * 100.0) as usize;
+
+        while !self.congested() && writes_allowed > 0 {
+            writes_allowed -= 1;
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -385,7 +394,8 @@ impl StreamState {
                     log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
-                    self.last_retrans = now;
+                    self.last_retrans_time = now;
+                    self.last_write_time = now;
                     continue;
                 }
             }
@@ -408,7 +418,7 @@ impl StreamState {
                 outgoing_callback(msg);
 
                 self.local_notify.notify_all();
-
+                self.last_write_time = now;
                 log::debug!("filled window to {}", self.inflight.inflight());
                 continue;
             }
