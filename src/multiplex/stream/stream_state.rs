@@ -266,6 +266,7 @@ impl StreamState {
                         self.cwnd_max,
                         self.inflight.bdp()
                     );
+                    self.local_notify.notify_all();
                 }
                 Message::Rel {
                     kind: RelKind::Syn,
