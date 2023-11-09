@@ -209,7 +209,7 @@ impl StreamState {
     fn tick_read(&mut self, _now: Instant, mut outgoing_callback: impl FnMut(Message)) {
         // Put all incoming packets into the reorderer.
         let mut to_ack = vec![];
-        log::debug!("processing incoming queue of {}", self.incoming_queue.len());
+        // log::debug!("processing incoming queue of {}", self.incoming_queue.len());
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
             // This unifies flow control with congestion control at the cost of a bit of efficiency.
@@ -261,11 +261,12 @@ impl StreamState {
                     // self.cwnd += incr / self.cwnd;
 
                     log::debug!(
-                        "n = {n}; send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}",
+                        "n = {n}; send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}; write queue {}",
                         self.inflight.inflight(),
                         self.cwnd,
                         self.cwnd_max,
-                        self.inflight.bdp()
+                        self.inflight.bdp(),
+                        self.queues.lock().write_stream.len()
                     );
                     self.local_notify.notify_all();
                 }
