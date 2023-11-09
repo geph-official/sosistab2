@@ -363,8 +363,8 @@ impl StreamState {
             }
         }
 
-        // every time we add another segment, we also transmit it, and set the RTO.
-        if self.inflight.lost() > 0 {
+        if self.inflight.lost() > 0 && self.cwnd >= self.inflight.bdp() as f64 {
+            // we only start recovery if the cwnd is greater than bdp. this filteres out spurious losses
             self.start_recovery();
         } else {
             self.stop_recovery();
