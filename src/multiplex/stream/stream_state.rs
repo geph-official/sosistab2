@@ -251,7 +251,7 @@ impl StreamState {
                         self.cwnd - self.cwnd_max
                     }
                     .max(n as f64 * 0.5);
-                    log::debug!("bic_inc = {bic_inc}");
+                    log::trace!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
                     // use HSTCP
@@ -259,7 +259,7 @@ impl StreamState {
                     // self.cwnd += incr / self.cwnd;
 
                     log::trace!("{n} acks received, increasing cwnd to {:.2}", self.cwnd);
-                    log::debug!(
+                    log::trace!(
                         "send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}",
                         self.inflight.inflight(),
                         self.cwnd,
