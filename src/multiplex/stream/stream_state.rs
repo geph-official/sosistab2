@@ -237,11 +237,13 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additional be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
-                            self.inflight.mark_acked(sack);
+                            if self.inflight.mark_acked(sack) {
+                                n += 1;
+                            }
                         }
                     }
 
@@ -381,8 +383,7 @@ impl StreamState {
             .as_secs_f64()
             * speed) as usize;
 
-        while !self.congested() && writes_allowed > 0 {
-            writes_allowed -= 1;
+        while !self.congested() {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -403,7 +404,7 @@ impl StreamState {
 
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
-            if !queues.write_stream.is_empty() {
+            if !queues.write_stream.is_empty() && writes_allowed > 0 {
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
                 buffer.truncate(n);
@@ -421,6 +422,7 @@ impl StreamState {
                 self.local_notify.notify_all();
                 self.last_write_time = now;
                 log::debug!("filled window to {}", self.inflight.inflight());
+                writes_allowed -= 1;
                 continue;
             }
 
