@@ -213,7 +213,7 @@ impl StreamState {
         for packet in self.incoming_queue.drain(..) {
             // If the receive queue is too large, then we pretend like we don't see anything. The sender will eventually retransmit.
             // This unifies flow control with congestion control at the cost of a bit of efficiency.
-            if self.queues.lock().read_stream.len() > 1_000_000 {
+            if self.queues.lock().read_stream.len() > 10_000_000 {
                 continue;
             }
 
@@ -245,14 +245,15 @@ impl StreamState {
                     }
 
                     // use BIC congestion control
-                    let bic_inc = if self.cwnd < self.cwnd_max {
-                        (self.cwnd_max - self.cwnd) / 2.0
-                    } else {
-                        self.cwnd - self.cwnd_max
+                    for _ in 0..n {
+                        let bic_inc = if self.cwnd < self.cwnd_max {
+                            (self.cwnd_max - self.cwnd) / 2.0
+                        } else {
+                            self.cwnd - self.cwnd_max
+                        }
+                        .max(self.cwnd.powf(0.4).max(1.0));
+                        self.cwnd += bic_inc / self.cwnd;
                     }
-                    .max(n as f64 * self.cwnd.powf(0.4).max(1.0));
-                    log::trace!("bic_inc = {bic_inc}");
-                    self.cwnd += bic_inc / self.cwnd;
 
                     // use HSTCP
                     // let incr = self.cwnd.powf(0.4).max(1.0);
