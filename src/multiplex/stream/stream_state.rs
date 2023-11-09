@@ -327,9 +327,9 @@ impl StreamState {
             } else {
                 self.cwnd_max = self.cwnd;
             }
-            // self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
-            // self.cwnd *= 1.0 - beta;
-            // self.cwnd = self.cwnd.max(1.0);
+            self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
+            self.cwnd *= 1.0 - beta;
+            self.cwnd = self.cwnd.max(1.0);
 
             // HSTCP
             // let factor = 0.75;
