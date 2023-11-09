@@ -250,7 +250,8 @@ impl StreamState {
                     } else {
                         self.cwnd - self.cwnd_max
                     }
-                    .max(n as f64 * 0.5);
+                    .max(n as f64 * 0.5)
+                    .min(n as f64 * 32.0);
                     log::trace!("bic_inc = {bic_inc}");
                     self.cwnd += bic_inc / self.cwnd;
 
