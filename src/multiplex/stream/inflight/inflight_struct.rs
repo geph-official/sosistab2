@@ -1,7 +1,7 @@
 use crate::multiplex::pipe_pool::*;
 use std::{
     collections::{btree_map::Entry, BTreeMap},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use super::calc::{BwCalculator, RttCalculator};
@@ -200,6 +200,11 @@ impl Inflight {
     /// The total bdp of the link, in packets
     pub fn bdp(&self) -> usize {
         (self.bw.delivery_rate() * self.rtt.min_rtt().as_secs_f64()) as usize
+    }
+
+    /// Minimum RTT
+    pub fn min_rtt(&self) -> Duration {
+        self.rtt.min_rtt()
     }
 
     /// The estimated delivery rate of the link

@@ -375,10 +375,11 @@ impl StreamState {
         }
 
         // hardcoded speed limit
+        let speed = self.cwnd / self.inflight.min_rtt().as_secs_f64();
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
             .as_secs_f64()
-            * 10.0) as usize;
+            * speed) as usize;
 
         while !self.congested() && writes_allowed > 0 {
             writes_allowed -= 1;
