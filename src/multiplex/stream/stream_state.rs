@@ -422,7 +422,7 @@ impl StreamState {
                 self.local_notify.notify_all();
                 self.last_write_time = now;
                 log::debug!("filled window to {}", self.inflight.inflight());
-                // writes_allowed -= 1;
+                writes_allowed -= 1;
                 continue;
             }
 
@@ -431,7 +431,13 @@ impl StreamState {
     }
 
     fn retick_time(&self, now: Instant) -> Instant {
-        now + Duration::from_millis(1)
+        let idle = { self.inflight.inflight() == 0 };
+
+        if idle {
+            now + Duration::from_secs(100000)
+        } else {
+            now + Duration::from_millis(1)
+        }
         // if self.congested() {
         //     let need_packets_lost = self.inflight.inflight() + 1 - self.cwnd as usize;
         //     // log::debug!("need {need_packets_lost} lost before we're good to go");
