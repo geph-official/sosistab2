@@ -397,7 +397,6 @@ impl StreamState {
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
                     self.last_retrans_time = now;
-                    self.last_write_time = now;
                     continue;
                 }
             }
@@ -405,6 +404,9 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() && writes_allowed > 0 {
+                // writes_allowed -= 1;
+                // self.last_write_time = now;
+
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();
                 buffer.truncate(n);
@@ -420,9 +422,8 @@ impl StreamState {
                 outgoing_callback(msg);
 
                 self.local_notify.notify_all();
-                self.last_write_time = now;
                 log::debug!("filled window to {}", self.inflight.inflight());
-                writes_allowed -= 1;
+
                 continue;
             }
 
