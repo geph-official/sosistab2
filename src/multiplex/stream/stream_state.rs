@@ -111,7 +111,7 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 1.0,
+            cwnd: 10.0,
             cwnd_max: 0.0,
 
             in_recovery: false,
