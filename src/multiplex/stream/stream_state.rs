@@ -377,7 +377,7 @@ impl StreamState {
         }
 
         // hardcoded speed limit
-        let speed = self.cwnd / self.inflight.min_rtt().as_secs_f64();
+        let speed = (self.cwnd / self.inflight.min_rtt().as_secs_f64()).max(50.0);
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
             .as_secs_f64()
