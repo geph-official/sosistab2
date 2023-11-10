@@ -404,8 +404,8 @@ impl StreamState {
             // okay, we don't have retransmissions. this means we get to send a "normal" packet.
             let mut queues = self.queues.lock();
             if !queues.write_stream.is_empty() && writes_allowed > 0 {
-                // writes_allowed -= 1;
-                // self.last_write_time = now;
+                writes_allowed -= 1;
+                self.last_write_time = now;
 
                 let mut buffer = vec![0; MSS];
                 let n = queues.write_stream.read(&mut buffer).unwrap();

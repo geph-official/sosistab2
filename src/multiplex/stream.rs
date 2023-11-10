@@ -210,7 +210,7 @@ impl AsyncWrite for MuxStream {
                             if inner.write_stream.capacity() > inner.write_stream.len() * 4 {
                                 inner.write_stream.shrink_to_fit();
                             }
-                            if inner.write_stream.len() <= 100_000 {
+                            if inner.write_stream.len() <= 1_000_000 {
                                 Some(())
                             } else {
                                 None
