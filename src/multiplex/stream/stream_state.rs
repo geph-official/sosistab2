@@ -421,10 +421,13 @@ impl StreamState {
     }
 
     fn retick_time(&self, now: Instant) -> Instant {
-        self.inflight
-            .first_rto()
-            .map(|s| s.1)
-            .unwrap_or_else(|| now + Duration::from_secs(10000))
+        let idle = { self.inflight.inflight() == 0 };
+
+        if idle {
+            now + Duration::from_secs(100000)
+        } else {
+            now + Duration::from_millis(5)
+        }
     }
 }
 
