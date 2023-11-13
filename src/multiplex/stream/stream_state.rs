@@ -422,14 +422,10 @@ impl StreamState {
         // } else {
         //     now + Duration::from_millis(3)
         // }
-        if self.congested() {
-            let need_packets_lost = self.inflight.inflight() + 1 - self.cwnd as usize;
-            // log::debug!("need {need_packets_lost} lost before we're good to go");
-            self.inflight.time_when_n_lost(need_packets_lost)
-        } else {
-            self.inflight.first_rto().map(|s| s.1)
-        }
-        .unwrap_or_else(|| now + Duration::from_secs(10000))
+        self.inflight
+            .first_rto()
+            .map(|s| s.1)
+            .unwrap_or_else(|| now + Duration::from_secs(10000))
     }
 }
 
