@@ -13,7 +13,7 @@ use event_listener::Event;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use parking_lot::{Mutex, RwLock};
 
-use serde::{Deserialize, Serialize};
+
 use smol::{
     channel::{Receiver, Sender},
     future::FutureExt,
@@ -22,71 +22,7 @@ use smol::{
 use smol_timeout::TimeoutExt;
 use smolscale::immortal::Immortal;
 
-use crate::{MuxPublic, Pipe};
-
-/// A sequence number.
-pub type Seqno = u64;
-/// An outer message.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum OuterMessage {
-    /// Frame sent from client to server when opening a connection. This is always globally encrypted.
-    ClientHello {
-        long_pk: MuxPublic,
-        eph_pk: x25519_dalek::PublicKey,
-        version: u64,
-        /// seconds since the unix epoch
-        timestamp: u64,
-    },
-    /// Frame sent from server to client to give a cookie for finally opening a connection.
-    ServerHello {
-        long_pk: MuxPublic,
-        eph_pk: x25519_dalek::PublicKey,
-    },
-
-    /// Non-handshake messages; inner = serialized EncryptedFrame
-    EncryptedMsg { inner: Bytes },
-}
-
-/// A message
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Message {
-    Rel {
-        kind: RelKind,
-        stream_id: u16,
-        seqno: Seqno,
-        payload: Bytes,
-    },
-    Urel {
-        stream_id: u16,
-        payload: Bytes,
-    },
-    Empty,
-}
-
-impl Message {
-    pub fn seqno(&self) -> u64 {
-        match self {
-            Message::Rel {
-                kind: _,
-                stream_id: _,
-                seqno,
-                payload: _,
-            } => *seqno,
-            _ => 0,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum RelKind {
-    Syn,
-    SynAck,
-    Data,
-    DataAck,
-    Fin,
-    FinAck,
-    Rst,
-}
+use crate::{Pipe};
 
 #[derive(Clone)]
 pub struct Reorderer<T: Clone> {

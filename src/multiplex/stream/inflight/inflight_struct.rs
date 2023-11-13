@@ -1,4 +1,4 @@
-use crate::multiplex::pipe_pool::*;
+use crate::{frame::Seqno, multiplex::stream::StreamMessage};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     time::{Duration, Instant},
@@ -11,7 +11,7 @@ use super::calc::{BwCalculator, RttCalculator};
 pub struct InflightEntry {
     send_time: Instant,
     retrans: u64,
-    payload: Message,
+    payload: StreamMessage,
 
     retrans_time: Instant,
     delivered: u64,
@@ -119,7 +119,7 @@ impl Inflight {
     }
 
     /// Inserts a packet to the inflight.
-    pub fn insert(&mut self, msg: Message) {
+    pub fn insert(&mut self, msg: StreamMessage) {
         let seqno = msg.seqno();
         let now = Instant::now();
         let rto_duration = self.rtt.rto();
@@ -159,7 +159,7 @@ impl Inflight {
     }
 
     /// Retransmits a particular seqno, clearing the "known lost" flag on the way.
-    pub fn retransmit(&mut self, seqno: Seqno) -> Option<Message> {
+    pub fn retransmit(&mut self, seqno: Seqno) -> Option<StreamMessage> {
         let rto = self.rtt.rto();
         let (payload, old_retrans, new_retrans) = {
             let entry = self.segments.get_mut(&seqno);

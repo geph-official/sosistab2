@@ -16,17 +16,15 @@ use stdcode::StdcodeSerializeExt;
 
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
+    frame::OuterMessage,
     multiplex::{
-        pipe_pool::RelKind,
+        stream::RelKind,
         trace::{trace_incoming_msg, trace_outgoing_msg},
     },
     MuxPublic, MuxSecret, MuxStream,
 };
 
-use super::{
-    pipe_pool::{Message, OuterMessage},
-    stream::stream_state::StreamState,
-};
+use super::stream::{stream_state::StreamState, StreamMessage};
 
 /// An encapsulation of the entire state of a Multiplex.
 pub struct MultiplexState {
@@ -73,7 +71,7 @@ impl MultiplexState {
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
     pub fn tick(&mut self, mut raw_callback: impl FnMut(OuterMessage)) -> Instant {
         // encryption
-        let mut outgoing_callback = |msg: Message| {
+        let mut outgoing_callback = |msg: StreamMessage| {
             log::trace!("send in tick {:?}", msg);
             trace_outgoing_msg(&msg);
             if let Some(send_aead) = self.send_aead.as_ref() {
@@ -192,12 +190,12 @@ impl MultiplexState {
                 if !self.replay_filter.add(nonce) {
                     anyhow::bail!("replay filter caught nonce {nonce}");
                 }
-                let inner: Message =
+                let inner: StreamMessage =
                     stdcode::deserialize(&inner).context("could not deserialize message")?;
                 log::trace!("recv {:?}", inner);
                 trace_incoming_msg(&inner);
                 match &inner {
-                    Message::Rel {
+                    StreamMessage::Rel {
                         kind: RelKind::Syn,
                         stream_id,
                         seqno: _,
@@ -221,7 +219,7 @@ impl MultiplexState {
 
                         self.stream_update.set();
                     }
-                    Message::Urel {
+                    StreamMessage::Urel {
                         stream_id,
                         payload: _,
                     } => {
@@ -233,7 +231,7 @@ impl MultiplexState {
                         self.stream_update.set();
                     }
 
-                    Message::Rel {
+                    StreamMessage::Rel {
                         kind,
                         stream_id,
                         seqno: _,
@@ -245,7 +243,7 @@ impl MultiplexState {
                         } else {
                             // respond with a RST if the kind is not already an RST. This prevents infinite RST loops, but kills connections that the other side thinks exists but we know do not.
                             if *kind != RelKind::Rst {
-                                let inner = Message::Rel {
+                                let inner = StreamMessage::Rel {
                                     kind: RelKind::Rst,
                                     stream_id: *stream_id,
                                     seqno: 0,
@@ -261,7 +259,7 @@ impl MultiplexState {
                         }
                     }
 
-                    Message::Empty => {}
+                    StreamMessage::Empty => {}
                 }
                 Ok(())
             }

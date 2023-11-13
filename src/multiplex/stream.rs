@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures_intrusive::sync::ManualResetEvent;
 use parking_lot::Mutex;
 use recycle_box::{coerce_box, RecycleBox};
+use serde::{Deserialize, Serialize};
 use smol::prelude::*;
 
 use std::{
@@ -13,6 +14,8 @@ use std::{
     task::Context,
     task::Poll,
 };
+
+use crate::frame::Seqno;
 
 mod inflight;
 pub mod stream_state;
@@ -262,4 +265,45 @@ struct StreamQueues {
     send_urel: VecDeque<Bytes>,
     connected: bool,
     closed: bool,
+}
+
+/// A message
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum StreamMessage {
+    Rel {
+        kind: RelKind,
+        stream_id: u16,
+        seqno: Seqno,
+        payload: Bytes,
+    },
+    Urel {
+        stream_id: u16,
+        payload: Bytes,
+    },
+    Empty,
+}
+
+impl StreamMessage {
+    pub fn seqno(&self) -> u64 {
+        match self {
+            StreamMessage::Rel {
+                kind: _,
+                stream_id: _,
+                seqno,
+                payload: _,
+            } => *seqno,
+            _ => 0,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum RelKind {
+    Syn,
+    SynAck,
+    Data,
+    DataAck,
+    Fin,
+    FinAck,
+    Rst,
 }
