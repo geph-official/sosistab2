@@ -40,7 +40,7 @@ pub struct StreamState {
     next_write_seqno: u64,
     last_retrans_time: Instant,
     cwnd: f64,
-    cwnd_max: f64,
+
     in_recovery: bool,
     last_write_time: Instant,
 
@@ -115,7 +115,6 @@ impl StreamState {
             inflight: Inflight::new(),
             next_write_seqno: 0,
             cwnd: 10.0,
-            cwnd_max: 0.0,
 
             in_recovery: false,
 
@@ -240,7 +239,7 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additionally be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
@@ -250,27 +249,14 @@ impl StreamState {
                         }
                     }
 
-                    // use BIC congestion control=
-                    for _ in 0..n {
-                        let bic_inc = if self.cwnd < self.cwnd_max {
-                            (self.cwnd_max - self.cwnd) / 2.0
-                        } else {
-                            self.cwnd - self.cwnd_max
-                        }
-                        .max(1.0)
-                        .min(50.0);
-                        self.cwnd += bic_inc / self.cwnd;
-                    }
-
                     // use HSTCP
-                    // let incr = self.cwnd.powf(0.4).max(1.0);
-                    // self.cwnd += incr / self.cwnd;
+                    let incr = self.cwnd.powf(0.4).max(1.0);
+                    self.cwnd += incr / self.cwnd;
 
                     log::debug!(
-                        "n = {n}; send window {}; cwnd {:.1}; cwnd_max {:.1}; bdp {}; write queue {}",
+                        "n = {n}; send window {}; cwnd {:.1}; bdp {}; write queue {}",
                         self.inflight.inflight(),
                         self.cwnd,
-                        self.cwnd_max,
                         self.inflight.bdp(),
                         self.queues.lock().write_stream.len()
                     );
@@ -330,21 +316,11 @@ impl StreamState {
     fn start_recovery(&mut self) {
         if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
-            // BIC
-            let beta = 0.15;
-            if self.cwnd < self.cwnd_max {
-                self.cwnd_max = self.cwnd * (2.0 - beta) / 2.0;
-            } else {
-                self.cwnd_max = self.cwnd;
-            }
-            // self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
-            self.cwnd *= 1.0 - beta;
-            self.cwnd = self.cwnd.max(1.0);
 
             // HSTCP
-            // let factor = 0.75;
-            // self.cwnd *= factor;
-            // self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
+            let factor = 0.75;
+            self.cwnd *= factor;
+            self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
 
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
