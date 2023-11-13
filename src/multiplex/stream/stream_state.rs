@@ -440,7 +440,7 @@ impl StreamState {
         if idle {
             now + Duration::from_secs(100000)
         } else {
-            now + Duration::from_millis(10)
+            now + Duration::from_millis(3)
         }
         // if self.congested() {
         //     let need_packets_lost = self.inflight.inflight() + 1 - self.cwnd as usize;
