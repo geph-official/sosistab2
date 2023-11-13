@@ -158,7 +158,7 @@ impl Inflight {
             .max()
     }
 
-    /// Retransmits a particular seqno, clearing the "known lost" flag on the way.
+    /// Retransmits a particular seqno
     pub fn retransmit(&mut self, seqno: Seqno) -> Option<StreamMessage> {
         let rto = self.rtt.rto();
         let (payload, old_retrans, new_retrans) = {

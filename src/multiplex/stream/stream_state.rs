@@ -241,14 +241,14 @@ impl StreamState {
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
                     let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
-                    // // then, we interpret the payload as a vector of acks that should additional be taken care of.
-                    // if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
-                    //     for sack in sacks {
-                    //         if self.inflight.mark_acked(sack) {
-                    //             n += 1;
-                    //         }
-                    //     }
-                    // }
+                    // then, we interpret the payload as a vector of acks that should additionally be taken care of.
+                    if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
+                        for sack in sacks {
+                            if self.inflight.mark_acked(sack) {
+                                // n += 1;
+                            }
+                        }
+                    }
 
                     // use BIC congestion control=
                     for _ in 0..n {
