@@ -50,13 +50,12 @@ impl Inflight {
         self.segments.len()
     }
 
-    pub fn lost(&self) -> usize {
-        // all segments that are lost
-        let now = Instant::now();
-        self.segments
-            .values()
-            .filter(|v| v.retrans_time <= now)
-            .count()
+    pub fn lost_at(&self, now: Instant) -> usize {
+        self.rtos
+            .iter()
+            .take_while(|(&retrans_time, _)| retrans_time <= now)
+            .map(|(_, seqnos)| seqnos.len())
+            .sum()
     }
 
     /// Mark all inflight packets less than a certain sequence number as acknowledged.
@@ -147,15 +146,6 @@ impl Inflight {
             .iter()
             .next()
             .map(|(instant, seqno)| (seqno[0], *instant))
-    }
-
-    /// Returns the amount of time required before this many packets are lost.
-    pub fn time_when_n_lost(&self, n: usize) -> Option<Instant> {
-        self.rtos
-            .iter()
-            .flat_map(|(rto, v)| v.iter().map(|_| *rto))
-            .take(n)
-            .max()
     }
 
     /// Retransmits a particular seqno

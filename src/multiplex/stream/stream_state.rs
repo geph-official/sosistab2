@@ -9,6 +9,7 @@ use std::{
 
 use bytes::Bytes;
 use futures_intrusive::sync::ManualResetEvent;
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use stdcode::StdcodeSerializeExt;
 
@@ -38,8 +39,8 @@ pub struct StreamState {
     // write variables
     inflight: Inflight,
     next_write_seqno: u64,
-    last_retrans_time: Instant,
     cwnd: f64,
+    ssthresh: f64,
 
     in_recovery: bool,
     last_write_time: Instant,
@@ -60,14 +61,14 @@ impl StreamState {
         global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
-        global_speed_guess: Arc<AtomicUsize>,
+        cwnd_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         Self::new_in_phase(
             global_notify,
             stream_id,
             Phase::Pending,
             additional_data,
-            global_speed_guess,
+            cwnd_guess,
         )
     }
 
@@ -76,14 +77,14 @@ impl StreamState {
         global_notify: Arc<ManualResetEvent>,
         stream_id: u16,
         additional_data: String,
-        global_speed_guess: Arc<AtomicUsize>,
+        cwnd_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         Self::new_in_phase(
             global_notify,
             stream_id,
             Phase::Established,
             additional_data,
-            global_speed_guess,
+            cwnd_guess,
         )
     }
 
@@ -93,7 +94,7 @@ impl StreamState {
         stream_id: u16,
         phase: Phase,
         additional_data: String,
-        global_speed_guess: Arc<AtomicUsize>,
+        cwnd_guess: Arc<AtomicUsize>,
     ) -> (Self, MuxStream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
@@ -103,6 +104,8 @@ impl StreamState {
             queues.clone(),
             additional_data.clone().into(),
         );
+
+        static START: Lazy<Instant> = Lazy::new(Instant::now);
         let state = Self {
             phase,
             stream_id,
@@ -114,15 +117,15 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 10.0,
+            cwnd: 1.0,
+            ssthresh: cwnd_guess.load(Ordering::SeqCst) as f64,
 
             in_recovery: false,
 
             additional_data,
-            last_retrans_time: Instant::now(),
-            last_write_time: Instant::now(),
+            last_write_time: *START,
 
-            global_cwnd_guess: global_speed_guess,
+            global_cwnd_guess: cwnd_guess,
         };
         (state, handle)
     }
@@ -253,8 +256,12 @@ impl StreamState {
                     let multiplier = self.inflight.min_rtt().as_secs_f64() / 0.05;
 
                     // use HSTCP
-                    let incr = self.cwnd.powf(0.4).max(1.0);
-                    self.cwnd += incr * multiplier / self.cwnd;
+                    if self.cwnd < self.ssthresh {
+                        self.cwnd += n as f64;
+                    } else {
+                        let incr = self.cwnd.powf(0.4).max(1.0);
+                        self.cwnd += incr * multiplier / self.cwnd;
+                    }
 
                     log::debug!(
                         "n = {n}; send window {}; cwnd {:.1}; bdp {}; write queue {}",
@@ -324,7 +331,7 @@ impl StreamState {
             let factor = 0.75;
             self.cwnd *= factor;
             self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
-
+            self.ssthresh = self.cwnd;
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
@@ -335,8 +342,8 @@ impl StreamState {
         self.in_recovery = false;
     }
 
-    fn congested(&self) -> bool {
-        self.inflight.inflight() - self.inflight.lost() >= self.cwnd as usize
+    fn congested(&self, now: Instant) -> bool {
+        self.inflight.inflight() - self.inflight.lost_at(now) >= self.cwnd as usize
     }
 
     fn tick_write(&mut self, now: Instant, mut outgoing_callback: impl FnMut(StreamMessage)) {
@@ -352,7 +359,7 @@ impl StreamState {
             }
         }
 
-        if self.inflight.lost() > 0 {
+        if self.inflight.lost_at(now) > 0 {
             self.start_recovery();
         } else {
             self.stop_recovery();
@@ -366,20 +373,19 @@ impl StreamState {
             .as_secs_f64()
             * speed) as usize;
 
-        while !self.congested() {
+        while !self.congested(now) {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
                     log::debug!(
                         "inflight = {}, lost = {}, cwnd = {}",
                         self.inflight.inflight(),
-                        self.inflight.lost(),
+                        self.inflight.lost_at(now),
                         self.cwnd
                     );
                     log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     outgoing_callback(first);
-                    self.last_retrans_time = now;
                     continue;
                 }
             }

@@ -41,7 +41,7 @@ pub struct MultiplexState {
     // notify this when the streams need to be rescanned
     stream_update: Arc<ManualResetEvent>,
 
-    global_cwnd_guess: Arc<AtomicUsize>,
+    cwnd_guess: Arc<AtomicUsize>,
 }
 
 impl MultiplexState {
@@ -64,7 +64,7 @@ impl MultiplexState {
             stream_tab: AHashMap::new(),
             stream_update,
 
-            global_cwnd_guess: Arc::new(AtomicUsize::new(10)),
+            cwnd_guess: Arc::new(AtomicUsize::new(10)),
         }
     }
 
@@ -123,7 +123,7 @@ impl MultiplexState {
                     self.stream_update.clone(),
                     stream_id,
                     additional.to_owned(),
-                    self.global_cwnd_guess.clone(),
+                    self.cwnd_guess.clone(),
                 );
                 self.stream_tab.insert(stream_id, new_stream);
                 self.stream_update.set();
@@ -209,7 +209,7 @@ impl MultiplexState {
                                 self.stream_update.clone(),
                                 *stream_id,
                                 String::from_utf8_lossy(payload).to_string(),
-                                self.global_cwnd_guess.clone(),
+                                self.cwnd_guess.clone(),
                             );
                             let stream_id = *stream_id;
                             stream.inject_incoming(inner); // this creates the syn-ack
