@@ -249,9 +249,12 @@ impl StreamState {
                         }
                     }
 
+                    // adjust for latency
+                    let multiplier = self.inflight.min_rtt().as_secs_f64() / 0.05;
+
                     // use HSTCP
                     let incr = self.cwnd.powf(0.4).max(1.0);
-                    self.cwnd += incr / self.cwnd;
+                    self.cwnd += incr * multiplier / self.cwnd;
 
                     log::debug!(
                         "n = {n}; send window {}; cwnd {:.1}; bdp {}; write queue {}",
