@@ -358,7 +358,8 @@ impl StreamState {
             self.stop_recovery();
         }
 
-        // hardcoded speed limit
+        // speed here is calculated based on the idea that we should be able to transmit a whole cwnd of things in an rtt.
+        // we increase the speed a bit to be able to fill our cwnd properly
         let speed = (self.cwnd / self.inflight.min_rtt().as_secs_f64()).max(50.0) * 1.2;
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
@@ -414,21 +415,21 @@ impl StreamState {
     }
 
     fn retick_time(&self, now: Instant) -> Instant {
-        let idle = { self.inflight.inflight() == 0 };
+        // let idle = { self.inflight.inflight() == 0 };
 
-        if idle {
-            now + Duration::from_secs(100000)
-        } else {
-            now + Duration::from_millis(3)
-        }
-        // if self.congested() {
-        //     let need_packets_lost = self.inflight.inflight() + 1 - self.cwnd as usize;
-        //     // log::debug!("need {need_packets_lost} lost before we're good to go");
-        //     self.inflight.time_when_n_lost(need_packets_lost)
+        // if idle {
+        //     now + Duration::from_secs(100000)
         // } else {
-        //     self.inflight.first_rto().map(|s| s.1)
+        //     now + Duration::from_millis(3)
         // }
-        // .unwrap_or_else(|| now + Duration::from_secs(10000))
+        if self.congested() {
+            let need_packets_lost = self.inflight.inflight() + 1 - self.cwnd as usize;
+            // log::debug!("need {need_packets_lost} lost before we're good to go");
+            self.inflight.time_when_n_lost(need_packets_lost)
+        } else {
+            self.inflight.first_rto().map(|s| s.1)
+        }
+        .unwrap_or_else(|| now + Duration::from_secs(10000))
     }
 }
 
