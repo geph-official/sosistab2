@@ -252,14 +252,16 @@ impl StreamState {
                         }
                     }
 
-                    // use HSTCP
-                    if self.cwnd < self.ssthresh {
-                        self.cwnd += n as f64;
-                    } else {
-                        // this basically stabilizes at 5% pkt loss
-                        self.cwnd += (n as f64 * 0.05).max(1.0 / self.cwnd);
-                        // let incr = self.cwnd.powf(0.4).max(1.0);
-                        // self.cwnd += n as f64 * incr / self.cwnd;
+                    // use BIC
+                    for _ in 0..n {
+                        let bic_inc = if self.cwnd < self.ssthresh {
+                            (self.ssthresh - self.cwnd) / 2.0
+                        } else {
+                            self.cwnd - self.ssthresh
+                        }
+                        .max(1.0)
+                        .min(100.0);
+                        self.cwnd += bic_inc / self.cwnd;
                     }
 
                     log::debug!(
@@ -326,11 +328,17 @@ impl StreamState {
         if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
-            // HSTCP
-            let factor = 0.8;
-            self.cwnd *= factor;
+            // BIC
+            let beta = 0.15;
+            if self.cwnd < self.ssthresh {
+                self.ssthresh = self.cwnd * (2.0 - beta) / 2.0;
+            } else {
+                self.ssthresh = self.cwnd;
+            }
+            // self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
+            self.cwnd *= 1.0 - beta;
+            self.cwnd = self.cwnd.max(1.0);
 
-            self.ssthresh = self.cwnd;
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
