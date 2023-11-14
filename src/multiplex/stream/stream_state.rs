@@ -257,7 +257,7 @@ impl StreamState {
                         self.cwnd += n as f64;
                     } else {
                         let incr = self.cwnd.powf(0.4).max(1.0);
-                        self.cwnd += incr * 10.0 / self.cwnd;
+                        self.cwnd += incr * 100.0 / self.cwnd;
                     }
 
                     log::debug!(
