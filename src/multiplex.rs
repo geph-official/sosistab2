@@ -1,3 +1,4 @@
+mod highspeed;
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
