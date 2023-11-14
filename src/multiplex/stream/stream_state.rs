@@ -432,7 +432,7 @@ impl StreamState {
         if idle {
             now + Duration::from_secs(100000)
         } else {
-            now + Duration::from_millis(20)
+            now + Duration::from_millis(1)
         }
     }
 }
