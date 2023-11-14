@@ -327,7 +327,7 @@ impl StreamState {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // HSTCP
-            let factor = 0.50;
+            let factor = 0.8;
             self.cwnd *= factor;
 
             self.ssthresh = self.cwnd;
