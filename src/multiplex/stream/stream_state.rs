@@ -242,12 +242,12 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additionally be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
                             if self.inflight.mark_acked(sack) {
-                                n += 1;
+                                // n += 1;
                             }
                         }
                     }
@@ -321,14 +321,14 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery {
+        if !self.in_recovery && self.cwnd > self.inflight.bdp() as f64 {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // HSTCP
             let factor = 0.75;
             self.cwnd *= factor;
             self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
-            self.ssthresh = self.cwnd;
+            self.ssthresh = self.inflight.bdp() as f64;
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
