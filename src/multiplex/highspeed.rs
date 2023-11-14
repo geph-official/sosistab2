@@ -1,8 +1,8 @@
 // Constants
-const LOW_WINDOW: f64 = 1.0;
+const LOW_WINDOW: f64 = 38.0;
 const HIGH_WINDOW: f64 = 83000.0;
 const LOW_P: f64 = 1e-3;
-const HIGH_P: f64 = 1e-6;
+const HIGH_P: f64 = 1e-7;
 const HIGH_DECREASE: f64 = 0.1;
 
 fn s() -> f64 {
