@@ -256,8 +256,8 @@ impl StreamState {
                     if self.cwnd < self.ssthresh {
                         self.cwnd += n as f64;
                     } else {
-                        // this basically stabilizes at 1% pkt loss
-                        self.cwnd += (n as f64 * 0.01).max(1.0 / self.cwnd);
+                        // this basically stabilizes at 5% pkt loss
+                        self.cwnd += (n as f64 * 0.05).max(1.0 / self.cwnd);
                         // let incr = self.cwnd.powf(0.4).max(1.0);
                         // self.cwnd += n as f64 * incr / self.cwnd;
                     }
@@ -327,7 +327,7 @@ impl StreamState {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // HSTCP
-            let factor = 0.75;
+            let factor = 0.50;
             self.cwnd *= factor;
 
             self.ssthresh = self.cwnd;
