@@ -417,7 +417,7 @@ impl StreamState {
     }
 
     fn retick_time(&self, now: Instant) -> Instant {
-        let idle = { self.inflight.inflight() == 0 };
+        let idle = { self.inflight.inflight() == 0 && self.queues.lock().write_stream.is_empty() };
 
         if idle {
             now + Duration::from_secs(100000)
