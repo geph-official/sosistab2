@@ -242,7 +242,7 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additionally be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
