@@ -254,12 +254,14 @@ impl StreamState {
                     }
 
                     // use HSTCP
-                    if self.cwnd < self.ssthresh {
-                        self.cwnd += n as f64;
-                    } else {
-                        let incr = highspeed::alpha(self.cwnd);
-                        log::debug!("incr = {:.2}", incr);
-                        self.cwnd += n as f64 * incr / self.cwnd;
+                    for _ in 0..n {
+                        if self.cwnd < self.ssthresh {
+                            self.cwnd += 1.0;
+                        } else {
+                            let incr = highspeed::alpha(self.cwnd);
+                            log::debug!("incr = {:.2}", incr);
+                            self.cwnd += n as f64 * incr / self.cwnd;
+                        }
                     }
 
                     log::debug!(
