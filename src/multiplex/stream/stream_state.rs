@@ -253,15 +253,18 @@ impl StreamState {
                     }
 
                     // use BIC
-                    for _ in 0..n {
-                        let bic_inc = if self.cwnd < self.ssthresh {
-                            (self.ssthresh - self.cwnd) / 2.0
-                        } else {
-                            self.cwnd - self.ssthresh
-                        }
-                        .max(1.0)
-                        .min(100.0);
-                        self.cwnd += bic_inc / self.cwnd;
+                    // for _ in 0..n {
+                    //     let bic_inc = if self.cwnd < self.ssthresh {
+                    //         (self.ssthresh - self.cwnd) / 2.0
+                    //     } else {
+                    //         self.cwnd - self.ssthresh
+                    //     }
+                    //     .max(1.0)
+                    //     .min(100.0);
+                    //     self.cwnd += bic_inc / self.cwnd;
+                    // }
+                    if self.cwnd < self.inflight.bdp() as f64 {
+                        self.cwnd += n as f64;
                     }
 
                     log::debug!(
