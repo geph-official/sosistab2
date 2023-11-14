@@ -380,7 +380,6 @@ impl StreamState {
             * speed) as usize;
 
         while !self.congested(now) && writes_allowed > 0 {
-            writes_allowed -= 1;
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -394,7 +393,6 @@ impl StreamState {
                     let first = self.inflight.retransmit(seqno).expect("no first");
 
                     outgoing_callback(first);
-                    self.last_write_time = now;
                     continue;
                 }
             }
@@ -418,7 +416,7 @@ impl StreamState {
 
                 outgoing_callback(msg);
                 self.last_write_time = now;
-
+                writes_allowed -= 1;
                 continue;
             }
 
