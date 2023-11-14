@@ -407,7 +407,6 @@ impl StreamState {
                 outgoing_callback(msg);
 
                 self.local_notify.notify_all();
-                log::debug!("filled window to {}", self.inflight.inflight());
 
                 continue;
             }
