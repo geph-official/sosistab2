@@ -321,14 +321,14 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd > self.inflight.bdp() as f64 {
+        if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // HSTCP
             let factor = 0.75;
             self.cwnd *= factor;
             self.cwnd = self.cwnd.max(self.inflight.bdp() as f64 * factor).max(1.0);
-            self.ssthresh = self.inflight.bdp() as f64;
+            self.ssthresh = self.cwnd;
             self.global_cwnd_guess
                 .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
