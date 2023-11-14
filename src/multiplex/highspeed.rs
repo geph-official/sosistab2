@@ -6,7 +6,7 @@ const HIGH_P: f64 = 1e-7;
 const HIGH_DECREASE: f64 = 0.1;
 
 fn s() -> f64 {
-    (HIGH_WINDOW.log2() - LOW_WINDOW.log10()) / (HIGH_P.log10() - LOW_P.log10())
+    (HIGH_WINDOW.log2() - LOW_WINDOW.log2()) / (HIGH_P.log2() - LOW_P.log2())
 }
 
 pub fn beta(w: f64) -> f64 {
@@ -16,8 +16,8 @@ pub fn beta(w: f64) -> f64 {
         HIGH_DECREASE
     } else {
         // Linear interpolation between Low_Window and High_Window
-        (HIGH_DECREASE - 0.5) * (w.log10() - LOW_WINDOW.log10())
-            / (HIGH_WINDOW.log10() - LOW_WINDOW.log10())
+        (HIGH_DECREASE - 0.5) * (w.log2() - LOW_WINDOW.log2())
+            / (HIGH_WINDOW.log2() - LOW_WINDOW.log2())
             + 0.5
     }
 }
