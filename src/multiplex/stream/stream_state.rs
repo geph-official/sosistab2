@@ -252,15 +252,12 @@ impl StreamState {
                         }
                     }
 
-                    // adjust for latency
-                    let multiplier = self.inflight.min_rtt().as_secs_f64() / 0.05;
-
                     // use HSTCP
                     if self.cwnd < self.ssthresh {
                         self.cwnd += n as f64;
                     } else {
                         let incr = self.cwnd.powf(0.4).max(1.0);
-                        self.cwnd += incr * multiplier / self.cwnd;
+                        self.cwnd += incr * 10.0 / self.cwnd;
                     }
 
                     log::debug!(
