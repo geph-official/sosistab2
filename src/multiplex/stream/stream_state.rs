@@ -236,12 +236,19 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additionally be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
                             if self.inflight.mark_acked(sack) {
-                                // n += 1;
+                                // this is quite important to keep the pipe full, even when there's loss.
+                                // in the same spirit as RFC 5681 (though we use a different way of doing fast-retransmit):
+                                // 4.  For each additional duplicate ACK received (after the third),
+                                // cwnd MUST be incremented by SMSS.  This artificially inflates the
+                                // congestion window in order to reflect the additional segment that
+                                // has left the network.
+
+                                n += 1;
                             }
                         }
                     }
