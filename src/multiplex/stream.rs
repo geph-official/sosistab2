@@ -1,6 +1,5 @@
 use bytes::Bytes;
 
-
 use parking_lot::Mutex;
 use recycle_box::{coerce_box, RecycleBox};
 use serde::{Deserialize, Serialize};
@@ -38,12 +37,12 @@ pub struct Stream {
     local_notify: Arc<async_event::Event>,
     // queues that connect this facade with the "real deal" in Multiplex
     queues: Arc<Mutex<StreamQueues>>,
-    additional_info: Arc<String>,
+    label: Arc<String>,
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        if let Some(_nfo) = Arc::get_mut(&mut self.additional_info) {
+        if let Some(_nfo) = Arc::get_mut(&mut self.label) {
             // this means we're the last one!
             self.queues.lock().closed = true;
             (self.tick_notify)();
@@ -60,7 +59,7 @@ impl Stream {
         tick_notify: impl Fn() + Send + Sync + 'static,
         ready: Arc<async_event::Event>,
         queues: Arc<Mutex<StreamQueues>>,
-        additional_info: Arc<String>,
+        label: Arc<String>,
     ) -> Self {
         Self {
             tick_notify: Arc::new(tick_notify),
@@ -73,7 +72,7 @@ impl Stream {
             })))),
             write_ready_resolved: true, // forces redoing the future on first write
             local_notify: ready,
-            additional_info,
+            label,
             queues,
         }
     }
@@ -94,9 +93,14 @@ impl Stream {
         Ok(())
     }
 
-    /// Returns the "additional info" attached to the stream.
+    /// Returns the label attached to the stream.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[deprecated]
     pub fn additional_info(&self) -> &str {
-        &self.additional_info
+        self.label()
     }
 
     /// Shuts down the stream, causing future read and write operations to fail.
@@ -140,7 +144,7 @@ impl Clone for Stream {
             move || tn(),
             self.local_notify.clone(),
             self.queues.clone(),
-            self.additional_info.clone(),
+            self.label.clone(),
         )
     }
 }

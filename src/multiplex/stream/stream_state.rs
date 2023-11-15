@@ -64,18 +64,18 @@ impl StreamState {
     pub fn new_pending(
         tick_notify: impl Fn() + Send + Sync + 'static,
         stream_id: u16,
-        additional_data: String,
+        label: String,
     ) -> (Self, Stream) {
-        Self::new_in_phase(tick_notify, stream_id, Phase::Pending, additional_data)
+        Self::new_in_phase(tick_notify, stream_id, Phase::Pending, label)
     }
 
     /// Creates a new StreamState, in the established state. Also returns the "user-facing" handle.
     pub fn new_established(
         tick_notify: impl Fn() + Send + Sync + 'static,
         stream_id: u16,
-        additional_data: String,
+        label: String,
     ) -> (Self, Stream) {
-        Self::new_in_phase(tick_notify, stream_id, Phase::Established, additional_data)
+        Self::new_in_phase(tick_notify, stream_id, Phase::Established, label)
     }
 
     /// Creates a new StreamState, in the specified state. Also returns the "user-facing" handle.
@@ -83,7 +83,7 @@ impl StreamState {
         tick_notify: impl Fn() + Send + Sync + 'static,
         stream_id: u16,
         phase: Phase,
-        additional_data: String,
+        label: String,
     ) -> (Self, Stream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
@@ -91,7 +91,7 @@ impl StreamState {
             tick_notify,
             ready.clone(),
             queues.clone(),
-            additional_data.clone().into(),
+            label.clone().into(),
         );
 
         static START: Lazy<Instant> = Lazy::new(Instant::now);
@@ -111,7 +111,7 @@ impl StreamState {
 
             in_recovery: false,
 
-            additional_data,
+            additional_data: label,
             last_write_time: *START,
         };
         (state, handle)
