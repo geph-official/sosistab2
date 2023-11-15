@@ -1,12 +1,10 @@
-use std::{
-    sync::atomic::AtomicUsize,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ahash::AHashMap;
 use anyhow::Context;
 
 use bytes::Bytes;
+use clone_macro::clone;
 use futures_intrusive::sync::ManualResetEvent;
 use rand::Rng;
 use rand_chacha::rand_core::OsRng;
@@ -16,12 +14,12 @@ use stdcode::StdcodeSerializeExt;
 
 use crate::{
     crypt::{triple_ecdh, NonObfsAead},
-    frame::OuterMessage,
+    frame::Frame,
     multiplex::{
         stream::RelKind,
         trace::{trace_incoming_msg, trace_outgoing_msg},
     },
-    MuxPublic, MuxSecret, MuxStream,
+    MuxPublic, MuxSecret, Stream,
 };
 
 use super::stream::{stream_state::StreamState, StreamMessage};
@@ -39,9 +37,7 @@ pub struct MultiplexState {
 
     stream_tab: AHashMap<u16, StreamState>,
     // notify this when the streams need to be rescanned
-    stream_update: Arc<ManualResetEvent>,
-
-    cwnd_guess: Arc<AtomicUsize>,
+    stream_tick_notify: Arc<ManualResetEvent>,
 }
 
 impl MultiplexState {
@@ -62,21 +58,19 @@ impl MultiplexState {
             local_lsk,
             peer_lpk,
             stream_tab: AHashMap::new(),
-            stream_update,
-
-            cwnd_guess: Arc::new(AtomicUsize::new(10)),
+            stream_tick_notify: stream_update,
         }
     }
 
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
-    pub fn tick(&mut self, mut raw_callback: impl FnMut(OuterMessage)) -> Instant {
+    pub fn tick(&mut self, mut raw_callback: impl FnMut(Frame)) -> Instant {
         // encryption
         let mut outgoing_callback = |msg: StreamMessage| {
             log::trace!("send in tick {:?}", msg);
             trace_outgoing_msg(&msg);
             if let Some(send_aead) = self.send_aead.as_ref() {
                 let inner = send_aead.encrypt(&msg.stdcode());
-                raw_callback(OuterMessage::EncryptedMsg { inner })
+                raw_callback(Frame::EncryptedMsg { inner })
             }
         };
 
@@ -100,7 +94,7 @@ impl MultiplexState {
 
         // if we do not have a send_aead, we send a hello and wait a second
         if self.send_aead.is_none() {
-            let hello = OuterMessage::ClientHello {
+            let hello = Frame::ClientHello {
                 long_pk: self.local_lsk.to_public(),
                 eph_pk: (&self.local_esk_send).into(),
                 version: 1,
@@ -115,18 +109,17 @@ impl MultiplexState {
     }
 
     /// Starts the opening of a connection, returning a Stream in the pending state.
-    pub fn start_open_stream(&mut self, additional: &str) -> anyhow::Result<MuxStream> {
+    pub fn start_open_stream(&mut self, additional: &str) -> anyhow::Result<Stream> {
         for _ in 0..100 {
             let stream_id: u16 = rand::thread_rng().gen();
             if !self.stream_tab.contains_key(&stream_id) {
                 let (new_stream, handle) = StreamState::new_pending(
-                    self.stream_update.clone(),
+                    clone!([{ self.stream_tick_notify } as s], move || s.set()),
                     stream_id,
                     additional.to_owned(),
-                    self.cwnd_guess.clone(),
                 );
                 self.stream_tab.insert(stream_id, new_stream);
-                self.stream_update.set();
+                self.stream_tick_notify.set();
                 return Ok(handle);
             }
         }
@@ -136,12 +129,12 @@ impl MultiplexState {
     /// Processes an incoming message. If the message is rejected for whatever reason, an error is returned, but the state should be presumed to still be in a valid state.
     pub fn recv_msg(
         &mut self,
-        msg: OuterMessage,
-        mut outgoing_callback: impl FnMut(OuterMessage),
-        mut accept_callback: impl FnMut(MuxStream),
+        msg: Frame,
+        mut outgoing_callback: impl FnMut(Frame),
+        mut accept_callback: impl FnMut(Stream),
     ) -> anyhow::Result<()> {
         match msg {
-            OuterMessage::ClientHello {
+            Frame::ClientHello {
                 long_pk,
                 eph_pk,
                 version: _,
@@ -158,14 +151,14 @@ impl MultiplexState {
                 );
                 log::debug!("receive-side symmetric key registered: {:?}", recv_secret);
                 self.recv_aead = Some(NonObfsAead::new(recv_secret.as_bytes()));
-                let our_hello = OuterMessage::ServerHello {
+                let our_hello = Frame::ServerHello {
                     long_pk: self.local_lsk.to_public(),
                     eph_pk: (&self.local_esk_recv).into(),
                 };
                 outgoing_callback(our_hello);
                 Ok(())
             }
-            OuterMessage::ServerHello { long_pk, eph_pk } => {
+            Frame::ServerHello { long_pk, eph_pk } => {
                 if self.peer_lpk.is_none() {
                     self.peer_lpk = Some(long_pk);
                 }
@@ -178,10 +171,10 @@ impl MultiplexState {
                 log::debug!("send-side symmetric key registered: {:?}", send_secret);
                 self.send_aead = Some(NonObfsAead::new(send_secret.as_bytes()));
                 // we unblock the ticks because the ticker could be in the state where it's slowly retransmitting hellos
-                self.stream_update.set();
+                self.stream_tick_notify.set();
                 Ok(())
             }
-            OuterMessage::EncryptedMsg { inner } => {
+            Frame::EncryptedMsg { inner } => {
                 let recv_aead = self
                     .recv_aead
                     .as_ref()
@@ -206,18 +199,15 @@ impl MultiplexState {
                         } else {
                             // create a new stream in the right state. we don't need to do anything else
                             let (mut stream, handle) = StreamState::new_established(
-                                self.stream_update.clone(),
+                                clone!([{ self.stream_tick_notify } as s], move || s.set()),
                                 *stream_id,
                                 String::from_utf8_lossy(payload).to_string(),
-                                self.cwnd_guess.clone(),
                             );
                             let stream_id = *stream_id;
                             stream.inject_incoming(inner); // this creates the syn-ack
                             self.stream_tab.insert(stream_id, stream);
                             accept_callback(handle);
                         }
-
-                        self.stream_update.set();
                     }
                     StreamMessage::Urel {
                         stream_id,
@@ -228,7 +218,6 @@ impl MultiplexState {
                             .get_mut(stream_id)
                             .context("dropping urel message with unknown stream id")?;
                         stream.inject_incoming(inner);
-                        self.stream_update.set();
                     }
 
                     StreamMessage::Rel {
@@ -239,7 +228,6 @@ impl MultiplexState {
                     } => {
                         if let Some(stream) = self.stream_tab.get_mut(stream_id) {
                             stream.inject_incoming(inner);
-                            self.stream_update.set();
                         } else {
                             // respond with a RST if the kind is not already an RST. This prevents infinite RST loops, but kills connections that the other side thinks exists but we know do not.
                             if *kind != RelKind::Rst {
@@ -254,7 +242,7 @@ impl MultiplexState {
                                     .as_ref()
                                     .context("cannot get send_aead to respond with RST")?
                                     .encrypt(&inner.stdcode());
-                                outgoing_callback(OuterMessage::EncryptedMsg { inner });
+                                outgoing_callback(Frame::EncryptedMsg { inner });
                             }
                         }
                     }

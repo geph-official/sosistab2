@@ -1,6 +1,5 @@
 use bytes::Bytes;
 
-use futures_intrusive::sync::ManualResetEvent;
 use parking_lot::Mutex;
 use recycle_box::{coerce_box, RecycleBox};
 use serde::{Deserialize, Serialize};
@@ -18,12 +17,16 @@ use std::{
 use crate::frame::Seqno;
 
 mod inflight;
+mod reorderer;
 pub mod stream_state;
 
-/// [MuxStream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
-pub struct MuxStream {
+#[deprecated]
+pub type MuxStream = Stream;
+
+/// [Stream] represents a reliable stream, multiplexed over a [Multiplex]. It implements [AsyncRead], [AsyncWrite], and [Clone], making using it very similar to using a TcpStream.
+pub struct Stream {
     // forces the multiplex to tick immediately
-    tick_notify: Arc<ManualResetEvent>,
+    tick_notify: Arc<dyn Fn() + Send + Sync + 'static>,
     // a future that resolves when read can return some bytes
     read_ready_future: Option<Pin<RecycleBox<dyn Future<Output = ()> + Send + 'static>>>,
     read_ready_resolved: bool,
@@ -34,32 +37,32 @@ pub struct MuxStream {
     local_notify: Arc<async_event::Event>,
     // queues that connect this facade with the "real deal" in Multiplex
     queues: Arc<Mutex<StreamQueues>>,
-    additional_info: Arc<String>,
+    label: Arc<String>,
 }
 
-impl Drop for MuxStream {
+impl Drop for Stream {
     fn drop(&mut self) {
-        if let Some(_nfo) = Arc::get_mut(&mut self.additional_info) {
+        if let Some(_nfo) = Arc::get_mut(&mut self.label) {
             // this means we're the last one!
             self.queues.lock().closed = true;
-            self.tick_notify.set();
+            (self.tick_notify)();
         }
     }
 }
 
 /// SAFETY: because of the definition of AsyncRead, it's not possible to ever concurrently end up polling the futures in the RecycleBoxes.
-unsafe impl Sync for MuxStream {}
+unsafe impl Sync for Stream {}
 
 // Note: a Stream can be thought of as a *facade* to a particular StreamState in the Multiplex.
-impl MuxStream {
+impl Stream {
     fn new(
-        global_notify: Arc<ManualResetEvent>,
+        tick_notify: impl Fn() + Send + Sync + 'static,
         ready: Arc<async_event::Event>,
         queues: Arc<Mutex<StreamQueues>>,
-        additional_info: Arc<String>,
+        label: Arc<String>,
     ) -> Self {
         Self {
-            tick_notify: global_notify,
+            tick_notify: Arc::new(tick_notify),
             read_ready_future: Some(RecycleBox::into_pin(coerce_box!(RecycleBox::new(async {
                 smol::future::pending().await
             })))),
@@ -69,7 +72,7 @@ impl MuxStream {
             })))),
             write_ready_resolved: true, // forces redoing the future on first write
             local_notify: ready,
-            additional_info,
+            label,
             queues,
         }
     }
@@ -90,22 +93,27 @@ impl MuxStream {
         Ok(())
     }
 
-    /// Returns the "additional info" attached to the stream.
+    /// Returns the label attached to the stream.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[deprecated]
     pub fn additional_info(&self) -> &str {
-        &self.additional_info
+        self.label()
     }
 
     /// Shuts down the stream, causing future read and write operations to fail.
     pub async fn shutdown(&mut self) {
         self.queues.lock().closed = true;
-        self.tick_notify.set();
+        (self.tick_notify)();
         self.local_notify.notify_all();
     }
 
     /// Sends an unreliable datagram.
     pub async fn send_urel(&self, dgram: Bytes) -> std::io::Result<()> {
         self.queues.lock().send_urel.push_back(dgram);
-        self.tick_notify.set();
+        (self.tick_notify)();
         Ok(())
     }
 
@@ -129,18 +137,19 @@ impl MuxStream {
     }
 }
 
-impl Clone for MuxStream {
+impl Clone for Stream {
     fn clone(&self) -> Self {
+        let tn = self.tick_notify.clone();
         Self::new(
-            self.tick_notify.clone(),
+            move || tn(),
             self.local_notify.clone(),
             self.queues.clone(),
-            self.additional_info.clone(),
+            self.label.clone(),
         )
     }
 }
 
-impl AsyncRead for MuxStream {
+impl AsyncRead for Stream {
     /// We use this horrible hack because we cannot simply write `async fn read()`. AsyncRead is defined in this arcane fashion largely because Rust does not have async traits yet.
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -179,7 +188,7 @@ impl AsyncRead for MuxStream {
                 self.read_ready_future = Some(read_future);
                 let mut queues = self.queues.lock();
                 let n = queues.read_stream.read(buf);
-                self.tick_notify.set();
+                (self.tick_notify)();
 
                 Poll::Ready(n)
             }
@@ -192,7 +201,7 @@ impl AsyncRead for MuxStream {
     }
 }
 
-impl AsyncWrite for MuxStream {
+impl AsyncWrite for Stream {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -229,7 +238,7 @@ impl AsyncWrite for MuxStream {
                 self.write_ready_resolved = true;
                 self.write_ready_future = Some(write_future);
                 let n = self.queues.lock().write_stream.write(buf);
-                self.tick_notify.set();
+                (self.tick_notify)();
 
                 Poll::Ready(n)
             }
@@ -243,7 +252,7 @@ impl AsyncWrite for MuxStream {
 
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         self.queues.lock().closed = true;
-        self.tick_notify.set();
+        (self.tick_notify)();
         Poll::Ready(Ok(()))
     }
 
@@ -267,7 +276,7 @@ struct StreamQueues {
     closed: bool,
 }
 
-/// A message
+/// A stream-related message.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StreamMessage {
     Rel {

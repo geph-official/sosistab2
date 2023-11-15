@@ -1,4 +1,3 @@
-mod highspeed;
 mod multiplex_state;
 mod pipe_pool;
 mod stream;
@@ -20,9 +19,13 @@ use smol::{
     future::FutureExt,
 };
 use stdcode::StdcodeSerializeExt;
-// pub use congestion::*;
+
 use crate::Pipe;
+
+#[allow(deprecated)]
 pub use stream::MuxStream;
+
+pub use stream::Stream;
 
 use self::{multiplex_state::MultiplexState, pipe_pool::PipePool};
 
@@ -31,7 +34,7 @@ pub struct Multiplex {
     pipe_pool: Arc<PipePool>,
     state: Arc<Mutex<MultiplexState>>,
     friends: ConcurrentQueue<Box<dyn Any + Send>>,
-    recv_accepted: Receiver<MuxStream>,
+    recv_accepted: Receiver<Stream>,
 
     _task: smol::Task<()>,
 }
@@ -107,7 +110,7 @@ impl Multiplex {
     }
 
     /// Open a reliable conn to the other end.
-    pub async fn open_conn(&self, additional: &str) -> std::io::Result<MuxStream> {
+    pub async fn open_conn(&self, additional: &str) -> std::io::Result<Stream> {
         // create a pre-open stream, then wait until the ticking makes it open
         let stream = self
             .state
@@ -119,7 +122,7 @@ impl Multiplex {
     }
 
     /// Accept a reliable conn from the other end.
-    pub async fn accept_conn(&self) -> std::io::Result<MuxStream> {
+    pub async fn accept_conn(&self) -> std::io::Result<Stream> {
         self.recv_accepted.recv().await.map_err(to_ioerror)
     }
 }
@@ -129,7 +132,7 @@ async fn multiplex_loop(
     state: Arc<Mutex<MultiplexState>>,
     stream_update: Arc<ManualResetEvent>,
     pipe_pool: Arc<PipePool>,
-    send_accepted: Sender<MuxStream>,
+    send_accepted: Sender<Stream>,
 ) {
     // we don't spawn more things to avoid unnecessary contention over mutexes etc
     let ticker = tick_loop(state.clone(), stream_update, pipe_pool.clone());
@@ -143,7 +146,7 @@ async fn multiplex_loop(
 async fn incoming_loop(
     state: Arc<Mutex<MultiplexState>>,
     pipe_pool: Arc<PipePool>,
-    send_accepted: Sender<MuxStream>,
+    send_accepted: Sender<Stream>,
 ) -> anyhow::Result<()> {
     let mut send_queue = vec![];
     loop {

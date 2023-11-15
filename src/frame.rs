@@ -8,7 +8,7 @@ pub type Seqno = u64;
 
 /// An outer message.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum OuterMessage {
+pub enum Frame {
     /// Frame sent from client to server when opening a connection. This is always globally encrypted.
     ClientHello {
         long_pk: MuxPublic,
