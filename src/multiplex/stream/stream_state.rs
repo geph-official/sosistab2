@@ -236,18 +236,17 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let ack_count = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additionally be taken care of.
+                    // we don't increment ack_count here, since when we actually fill the gaps ack_count will increase sharply.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
-                            if self.inflight.mark_acked(sack) {
-                                // n += 1;
-                            }
+                            self.inflight.mark_acked(sack);
                         }
                     }
 
                     // use BIC
-                    for _ in 0..n {
+                    for _ in 0..ack_count {
                         let bic_inc = if self.cwnd < self.ssthresh {
                             (self.ssthresh - self.cwnd) / 2.0
                         } else {
@@ -260,7 +259,7 @@ impl StreamState {
                     }
 
                     log::debug!(
-                        "n = {n}; send window {}; cwnd {:.1}; bdp {}; write queue {}",
+                        "ack_count = {ack_count}; send window {}; cwnd {:.1}; bdp {}; write queue {}",
                         self.inflight.inflight(),
                         self.cwnd,
                         self.inflight.bdp(),
@@ -320,7 +319,7 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd >= self.inflight.bdp() as f64 {
+        if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // BIC
