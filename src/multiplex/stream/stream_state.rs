@@ -6,6 +6,7 @@ use std::{
 
 use bytes::Bytes;
 
+use clone_macro::clone;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use stdcode::StdcodeSerializeExt;
@@ -37,6 +38,7 @@ pub struct StreamState {
     incoming_queue: Vec<StreamMessage>,
     queues: Arc<Mutex<StreamQueues>>,
     local_notify: Arc<async_event::Event>,
+    tick_notify: Arc<dyn Fn() + Send + Sync + 'static>,
 
     // read variables
     next_unseen_seqno: u64,
@@ -87,8 +89,9 @@ impl StreamState {
     ) -> (Self, Stream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
+        let tick_notify: Arc<dyn Fn() + Send + Sync + 'static> = Arc::new(tick_notify);
         let handle = Stream::new(
-            tick_notify,
+            clone!([tick_notify], move || tick_notify()),
             ready.clone(),
             queues.clone(),
             label.clone().into(),
@@ -108,6 +111,7 @@ impl StreamState {
             next_write_seqno: 0,
             cwnd: 4.0,
             ssthresh: 0.0,
+            tick_notify,
 
             in_recovery: false,
 
@@ -120,6 +124,7 @@ impl StreamState {
     /// Injects an incoming message.
     pub fn inject_incoming(&mut self, msg: StreamMessage) {
         self.incoming_queue.push(msg);
+        (self.tick_notify)();
     }
 
     /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at --- but if tick_notify, passed in during construction, fires, the stream must be ticked again.

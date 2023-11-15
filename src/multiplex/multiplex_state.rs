@@ -208,8 +208,6 @@ impl MultiplexState {
                             self.stream_tab.insert(stream_id, stream);
                             accept_callback(handle);
                         }
-
-                        self.stream_tick_notify.set();
                     }
                     StreamMessage::Urel {
                         stream_id,
@@ -220,7 +218,6 @@ impl MultiplexState {
                             .get_mut(stream_id)
                             .context("dropping urel message with unknown stream id")?;
                         stream.inject_incoming(inner);
-                        self.stream_tick_notify.set();
                     }
 
                     StreamMessage::Rel {
@@ -231,7 +228,6 @@ impl MultiplexState {
                     } => {
                         if let Some(stream) = self.stream_tab.get_mut(stream_id) {
                             stream.inject_incoming(inner);
-                            self.stream_tick_notify.set();
                         } else {
                             // respond with a RST if the kind is not already an RST. This prevents infinite RST loops, but kills connections that the other side thinks exists but we know do not.
                             if *kind != RelKind::Rst {
