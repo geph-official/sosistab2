@@ -247,7 +247,7 @@ impl StreamState {
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
                             if self.inflight.mark_acked(sack) {
-                                // n += 1;
+                                n += 1;
                             }
                         }
                     }
@@ -325,7 +325,7 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd >= self.inflight.bdp() as f64 {
+        if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // BIC
