@@ -1,29 +1,35 @@
 use std::{
     io::{Read, Write},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
-use futures_intrusive::sync::ManualResetEvent;
+
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use stdcode::StdcodeSerializeExt;
 
 use crate::{
-    multiplex::{
-        pipe_pool::Reorderer,
-        stream::{RelKind, StreamMessage},
-    },
-    MuxStream,
+    multiplex::stream::{RelKind, StreamMessage},
+    Stream,
 };
 
-use super::{inflight::Inflight, StreamQueues};
+use super::{inflight::Inflight, reorderer::Reorderer, StreamQueues};
 const MSS: usize = 1150;
 
+/// The raw internal state of a stream.
+///
+/// This is exposed so that crates other than `sosistab2` itself can use the reliable-stream logic of `sosistab2`, outside the context of multiplexing streams over a `sosistab2::Multiplex`.
+///
+/// A StreamState is constructed and used in a rather particular way:
+/// - On construction, a `tick_notify` closure is passed in.
+/// - The caller must arrange so that `StreamState::tick` is called
+///     - every time `tick_notify` is called
+///     - `tick_retval` after the last tick, where `tick_retval` is the return value of the last time the state was ticked
+/// - inject_incoming is called on every incoming message
+///
+/// As long as the above holds, the `Stream` corresponding to the `StreamState`, which is returned from the `StreamState` constructor as well, will work properly.
 pub struct StreamState {
     phase: Phase,
     stream_id: u16,
@@ -44,8 +50,6 @@ pub struct StreamState {
 
     in_recovery: bool,
     last_write_time: Instant,
-
-    global_cwnd_guess: Arc<AtomicUsize>,
 }
 
 impl Drop for StreamState {
@@ -58,48 +62,33 @@ impl Drop for StreamState {
 impl StreamState {
     /// Creates a new StreamState, in the pre-SYN-sent state. Also returns the "user-facing" handle.
     pub fn new_pending(
-        global_notify: Arc<ManualResetEvent>,
+        tick_notify: impl Fn() + Send + Sync + 'static,
         stream_id: u16,
         additional_data: String,
-        cwnd_guess: Arc<AtomicUsize>,
-    ) -> (Self, MuxStream) {
-        Self::new_in_phase(
-            global_notify,
-            stream_id,
-            Phase::Pending,
-            additional_data,
-            cwnd_guess,
-        )
+    ) -> (Self, Stream) {
+        Self::new_in_phase(tick_notify, stream_id, Phase::Pending, additional_data)
     }
 
     /// Creates a new StreamState, in the established state. Also returns the "user-facing" handle.
     pub fn new_established(
-        global_notify: Arc<ManualResetEvent>,
+        tick_notify: impl Fn() + Send + Sync + 'static,
         stream_id: u16,
         additional_data: String,
-        cwnd_guess: Arc<AtomicUsize>,
-    ) -> (Self, MuxStream) {
-        Self::new_in_phase(
-            global_notify,
-            stream_id,
-            Phase::Established,
-            additional_data,
-            cwnd_guess,
-        )
+    ) -> (Self, Stream) {
+        Self::new_in_phase(tick_notify, stream_id, Phase::Established, additional_data)
     }
 
     /// Creates a new StreamState, in the specified state. Also returns the "user-facing" handle.
     fn new_in_phase(
-        global_notify: Arc<ManualResetEvent>,
+        tick_notify: impl Fn() + Send + Sync + 'static,
         stream_id: u16,
         phase: Phase,
         additional_data: String,
-        cwnd_guess: Arc<AtomicUsize>,
-    ) -> (Self, MuxStream) {
+    ) -> (Self, Stream) {
         let queues = Arc::new(Mutex::new(StreamQueues::default()));
         let ready = Arc::new(async_event::Event::new());
-        let handle = MuxStream::new(
-            global_notify,
+        let handle = Stream::new(
+            tick_notify,
             ready.clone(),
             queues.clone(),
             additional_data.clone().into(),
@@ -117,15 +106,13 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 1.0,
-            ssthresh: cwnd_guess.load(Ordering::SeqCst) as f64,
+            cwnd: 4.0,
+            ssthresh: 0.0,
 
             in_recovery: false,
 
             additional_data,
             last_write_time: *START,
-
-            global_cwnd_guess: cwnd_guess,
         };
         (state, handle)
     }
@@ -135,7 +122,9 @@ impl StreamState {
         self.incoming_queue.push(msg);
     }
 
-    /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at. Returns None if the correct option is to delete the whole thing.
+    /// "Ticks" this StreamState, which advances its state. Any outgoing messages generated are passed to the callback given. Returns the correct time to call tick again at --- but if tick_notify, passed in during construction, fires, the stream must be ticked again.
+    ///
+    /// Returns None if the correct option is to delete the whole thing.
     pub fn tick(&mut self, mut outgoing_callback: impl FnMut(StreamMessage)) -> Option<Instant> {
         log::trace!("ticking {} at {:?}", self.stream_id, self.phase);
 
@@ -242,7 +231,7 @@ impl StreamState {
                     payload: selective_acks,
                 } => {
                     // mark every packet whose seqno is less than the given seqno as acked.
-                    let mut n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
+                    let n = self.inflight.mark_acked_lt(lowest_unseen_seqno);
                     // then, we interpret the payload as a vector of acks that should additionally be taken care of.
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
@@ -260,7 +249,8 @@ impl StreamState {
                             self.cwnd - self.ssthresh
                         }
                         .max(1.0)
-                        .min(50.0);
+                        .min(50.0)
+                        .min(self.cwnd);
                         self.cwnd += bic_inc / self.cwnd;
                     }
 
@@ -335,12 +325,10 @@ impl StreamState {
             } else {
                 self.ssthresh = self.cwnd;
             }
-            // self.cwnd_max = self.cwnd_max.max(self.inflight.bdp() as f64);
+
             self.cwnd *= 1.0 - beta;
             self.cwnd = self.cwnd.max(1.0);
 
-            self.global_cwnd_guess
-                .store(self.cwnd as usize, Ordering::Relaxed);
             self.in_recovery = true;
         }
     }
