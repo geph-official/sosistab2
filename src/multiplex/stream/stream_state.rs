@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::{inflight::Inflight, reorderer::Reorderer, StreamQueues};
-const MSS: usize = 11500;
+const MSS: usize = 1150;
 
 /// The raw internal state of a stream.
 ///

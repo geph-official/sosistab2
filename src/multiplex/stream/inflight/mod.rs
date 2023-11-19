@@ -91,7 +91,7 @@ impl Inflight {
         let mut to_remove = vec![];
         let now_rto = Instant::now();
         for (seqno, entry) in self.segments.iter_mut() {
-            if acked_seqno > seqno + 5 && entry.retrans == 0 && entry.retrans_time > now_rto {
+            if acked_seqno > seqno + 3 && entry.retrans == 0 && entry.retrans_time > now_rto {
                 log::debug!(
                     "fast retransmit triggered, acked_seqno = {acked_seqno}; seqno = {seqno}"
                 );
