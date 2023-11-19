@@ -330,6 +330,8 @@ impl StreamState {
                 self.ssthresh = self.cwnd;
             }
 
+            self.ssthresh = self.ssthresh.max(self.inflight.bdp() as f64);
+
             self.cwnd *= 1.0 - beta;
             self.cwnd = self.cwnd.max(1.0);
 
