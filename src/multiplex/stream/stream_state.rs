@@ -319,7 +319,7 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd >= self.inflight.bdp() as f64 {
+        if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // BIC
