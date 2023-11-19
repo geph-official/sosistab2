@@ -320,7 +320,7 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd > 1000.0 {
+        if !self.in_recovery {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // BIC
