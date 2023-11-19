@@ -408,7 +408,7 @@ impl StreamState {
                 self.local_notify.notify_all();
 
                 outgoing_callback(msg);
-                self.last_write_time = now;
+                // self.last_write_time = now;
                 // writes_allowed -= 1;
                 continue;
             }
