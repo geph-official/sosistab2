@@ -251,7 +251,7 @@ impl StreamState {
                         } else {
                             self.cwnd - self.ssthresh
                         }
-                        .max(1.0)
+                        .max(0.3)
                         .min(50.0)
                         .min(self.cwnd);
                         self.cwnd += bic_inc / self.cwnd;
