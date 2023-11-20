@@ -25,7 +25,9 @@ use crate::Pipe;
 #[allow(deprecated)]
 pub use stream::MuxStream;
 
+pub use stream::stream_state::StreamState;
 pub use stream::Stream;
+pub use stream::StreamMessage;
 
 use self::{multiplex_state::MultiplexState, pipe_pool::PipePool};
 

@@ -188,7 +188,7 @@ impl MultiplexState {
                 log::trace!("recv {:?}", inner);
                 trace_incoming_msg(&inner);
                 match &inner {
-                    StreamMessage::Rel {
+                    StreamMessage::Reliable {
                         kind: RelKind::Syn,
                         stream_id,
                         seqno: _,
@@ -209,7 +209,7 @@ impl MultiplexState {
                             accept_callback(handle);
                         }
                     }
-                    StreamMessage::Urel {
+                    StreamMessage::Unreliable {
                         stream_id,
                         payload: _,
                     } => {
@@ -220,7 +220,7 @@ impl MultiplexState {
                         stream.inject_incoming(inner);
                     }
 
-                    StreamMessage::Rel {
+                    StreamMessage::Reliable {
                         kind,
                         stream_id,
                         seqno: _,
@@ -231,7 +231,7 @@ impl MultiplexState {
                         } else {
                             // respond with a RST if the kind is not already an RST. This prevents infinite RST loops, but kills connections that the other side thinks exists but we know do not.
                             if *kind != RelKind::Rst {
-                                let inner = StreamMessage::Rel {
+                                let inner = StreamMessage::Reliable {
                                     kind: RelKind::Rst,
                                     stream_id: *stream_id,
                                     seqno: 0,

@@ -138,7 +138,7 @@ impl StreamState {
         match self.phase {
             Phase::Pending => {
                 // send a SYN, and transition into SynSent
-                outgoing_callback(StreamMessage::Rel {
+                outgoing_callback(StreamMessage::Reliable {
                     kind: RelKind::Syn,
                     stream_id: self.stream_id,
                     seqno: 0,
@@ -152,7 +152,7 @@ impl StreamState {
                 if self.incoming_queue.drain(..).any(|msg| {
                     matches!(
                         msg,
-                        StreamMessage::Rel {
+                        StreamMessage::Reliable {
                             kind: RelKind::SynAck,
                             stream_id: _,
                             seqno: _,
@@ -165,7 +165,7 @@ impl StreamState {
                     self.local_notify.notify_all();
                     Some(now)
                 } else if now >= next_resend {
-                    outgoing_callback(StreamMessage::Rel {
+                    outgoing_callback(StreamMessage::Reliable {
                         kind: RelKind::Syn,
                         stream_id: self.stream_id,
                         seqno: 0,
@@ -194,7 +194,7 @@ impl StreamState {
                 self.queues.lock().closed = true;
                 self.local_notify.notify_all();
                 for _ in self.incoming_queue.drain(..) {
-                    outgoing_callback(StreamMessage::Rel {
+                    outgoing_callback(StreamMessage::Reliable {
                         kind: RelKind::Rst,
                         stream_id: self.stream_id,
                         seqno: 0,
@@ -218,7 +218,7 @@ impl StreamState {
             }
 
             match packet {
-                StreamMessage::Rel {
+                StreamMessage::Reliable {
                     kind: RelKind::Data,
                     stream_id,
                     seqno,
@@ -229,7 +229,7 @@ impl StreamState {
                         to_ack.push(seqno);
                     }
                 }
-                StreamMessage::Rel {
+                StreamMessage::Reliable {
                     kind: RelKind::DataAck,
                     stream_id: _,
                     seqno: lowest_unseen_seqno, // *one greater* than the last packet that got to the other side
@@ -268,21 +268,21 @@ impl StreamState {
                     );
                     self.local_notify.notify_all();
                 }
-                StreamMessage::Rel {
+                StreamMessage::Reliable {
                     kind: RelKind::Syn,
                     stream_id,
                     seqno,
                     payload,
                 } => {
                     // retransmit our syn-ack
-                    outgoing_callback(StreamMessage::Rel {
+                    outgoing_callback(StreamMessage::Reliable {
                         kind: RelKind::SynAck,
                         stream_id,
                         seqno,
                         payload,
                     });
                 }
-                StreamMessage::Rel {
+                StreamMessage::Reliable {
                     kind: RelKind::Rst | RelKind::Fin,
                     stream_id: _,
                     seqno: _,
@@ -290,7 +290,7 @@ impl StreamState {
                 } => {
                     self.phase = Phase::Closed;
                 }
-                StreamMessage::Urel {
+                StreamMessage::Unreliable {
                     stream_id: _,
                     payload,
                 } => {
@@ -310,7 +310,7 @@ impl StreamState {
         if !to_ack.is_empty() {
             self.local_notify.notify_all();
             to_ack.retain(|a| a >= &self.next_unseen_seqno);
-            outgoing_callback(StreamMessage::Rel {
+            outgoing_callback(StreamMessage::Reliable {
                 kind: RelKind::DataAck,
                 stream_id: self.stream_id,
                 seqno: self.next_unseen_seqno,
@@ -352,7 +352,7 @@ impl StreamState {
         {
             let mut queues = self.queues.lock();
             while let Some(payload) = queues.send_urel.pop_front() {
-                outgoing_callback(StreamMessage::Urel {
+                outgoing_callback(StreamMessage::Unreliable {
                     stream_id: self.stream_id,
                     payload,
                 });
@@ -399,7 +399,7 @@ impl StreamState {
                 buffer.truncate(n);
                 let seqno = self.next_write_seqno;
                 self.next_write_seqno += 1;
-                let msg = StreamMessage::Rel {
+                let msg = StreamMessage::Reliable {
                     kind: RelKind::Data,
                     stream_id: self.stream_id,
                     seqno,

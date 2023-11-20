@@ -279,13 +279,13 @@ struct StreamQueues {
 /// A stream-related message.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StreamMessage {
-    Rel {
+    Reliable {
         kind: RelKind,
         stream_id: u16,
         seqno: Seqno,
         payload: Bytes,
     },
-    Urel {
+    Unreliable {
         stream_id: u16,
         payload: Bytes,
     },
@@ -295,7 +295,7 @@ pub enum StreamMessage {
 impl StreamMessage {
     pub fn seqno(&self) -> u64 {
         match self {
-            StreamMessage::Rel {
+            StreamMessage::Reliable {
                 kind: _,
                 stream_id: _,
                 seqno,

@@ -19,7 +19,7 @@ pub fn trace_outgoing_msg(msg: &StreamMessage) {
     });
 
     if let Some(mut inner) = TRACE_OUTGOING.as_ref() {
-        if let StreamMessage::Rel {
+        if let StreamMessage::Reliable {
             kind,
             stream_id,
             seqno,
@@ -50,7 +50,7 @@ pub fn trace_incoming_msg(msg: &StreamMessage) {
     });
 
     if let Some(mut inner) = TRACE_INCOMING.as_ref() {
-        if let StreamMessage::Rel {
+        if let StreamMessage::Reliable {
             kind,
             stream_id,
             seqno,
