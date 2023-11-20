@@ -366,7 +366,7 @@ impl StreamState {
         }
 
         // speed here is calculated based on the idea that we should be able to transmit a whole cwnd of things in an rtt.
-        let speed = (self.cwnd / self.inflight.min_rtt().as_secs_f64()).max(1.0);
+        let speed = self.speed();
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
             .as_secs_f64()
@@ -419,13 +419,17 @@ impl StreamState {
         }
     }
 
+    fn speed(&self) -> f64 {
+        (self.cwnd / self.inflight.min_rtt().as_secs_f64()).max(1.0)
+    }
+
     fn retick_time(&self, now: Instant) -> Instant {
         let idle = { self.inflight.inflight() == 0 && self.queues.lock().write_stream.is_empty() };
 
         if idle {
             now + Duration::from_secs(100000)
         } else {
-            now + Duration::from_millis(5)
+            now + Duration::from_secs_f64(1.0 / self.speed())
         }
     }
 }
