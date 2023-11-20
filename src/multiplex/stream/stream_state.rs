@@ -408,9 +408,9 @@ impl StreamState {
                 self.local_notify.notify_all();
 
                 outgoing_callback(msg);
-                self.last_write_time = now;
-                writes_allowed -= 1;
-                log::debug!("pacing {seqno} at {:.2} pkts/s", speed);
+                // self.last_write_time = now;
+                // writes_allowed -= 1;
+                // log::debug!("pacing {seqno} at {:.2} pkts/s", speed);
                 continue;
             }
 
