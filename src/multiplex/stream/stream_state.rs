@@ -241,7 +241,7 @@ impl StreamState {
                     if let Ok(sacks) = stdcode::deserialize::<Vec<u64>>(&selective_acks) {
                         for sack in sacks {
                             if self.inflight.mark_acked(sack) {
-                                // ack_count += 1;
+                                ack_count += 1;
                             }
                         }
                     }
