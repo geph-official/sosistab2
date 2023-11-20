@@ -384,7 +384,8 @@ impl StreamState {
                     );
                     log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
-
+                    writes_allowed -= 1;
+                    log::debug!("pacing RETRANSMIT {seqno} at {:.2} pkts/s", speed);
                     outgoing_callback(first);
                     continue;
                 }
@@ -424,7 +425,7 @@ impl StreamState {
         if idle {
             now + Duration::from_secs(100000)
         } else {
-            now + Duration::from_millis(20)
+            now + Duration::from_millis(5)
         }
     }
 }
