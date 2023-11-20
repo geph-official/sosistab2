@@ -429,7 +429,7 @@ impl StreamState {
         if idle {
             now + Duration::from_secs(100000)
         } else {
-            now + Duration::from_secs_f64(1.0 / self.speed())
+            now + Duration::from_secs_f64(1.0 / self.speed()) * 4
         }
     }
 }
