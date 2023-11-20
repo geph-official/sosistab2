@@ -32,8 +32,6 @@ pub struct Inflight {
 
     sent: u64,
     retrans: u64,
-
-    max_acked_lt: Seqno,
 }
 
 impl Inflight {
@@ -47,8 +45,6 @@ impl Inflight {
 
             sent: 0,
             retrans: 0,
-
-            max_acked_lt: 0,
         }
     }
 
@@ -66,10 +62,7 @@ impl Inflight {
     }
 
     /// Mark all inflight packets less than a certain sequence number as acknowledged.
-    ///
-    /// Returns how much the first inflight seqno has increased.
     pub fn mark_acked_lt(&mut self, seqno: Seqno) -> usize {
-        let start = self.max_acked_lt;
         let mut to_remove = vec![];
         for (k, _) in self.segments.iter() {
             if *k < seqno {
@@ -79,11 +72,13 @@ impl Inflight {
                 break;
             }
         }
+        let mut sum = 0;
         for seqno in to_remove {
-            self.mark_acked(seqno);
+            if self.mark_acked(seqno) {
+                sum += 1;
+            }
         }
-        self.max_acked_lt = self.max_acked_lt.max(seqno);
-        self.max_acked_lt.saturating_sub(start) as usize
+        sum
     }
 
     /// Marks a particular inflight packet as acknowledged. Returns whether or not there was actually such an inflight packet.
