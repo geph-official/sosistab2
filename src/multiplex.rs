@@ -26,6 +26,7 @@ use crate::Pipe;
 pub use stream::MuxStream;
 
 pub use stream::stream_state::StreamState;
+pub use stream::RelKind;
 pub use stream::Stream;
 pub use stream::StreamMessage;
 
