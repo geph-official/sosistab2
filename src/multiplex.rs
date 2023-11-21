@@ -26,8 +26,7 @@ use crate::Pipe;
 pub use stream::MuxStream;
 
 pub use stream::stream_state::StreamState;
-pub use stream::Stream;
-pub use stream::StreamMessage;
+pub use stream::{RelKind, Stream, StreamMessage};
 
 use self::{multiplex_state::MultiplexState, pipe_pool::PipePool};
 
