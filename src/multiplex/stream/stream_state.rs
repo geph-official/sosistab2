@@ -372,6 +372,8 @@ impl StreamState {
             .as_secs_f64()
             * speed) as usize;
 
+        writes_allowed = 100000;
+
         while !self.congested(now) && writes_allowed > 0 {
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
@@ -385,7 +387,7 @@ impl StreamState {
                     log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     writes_allowed -= 1;
-                    log::debug!("pacing RETRANSMIT {seqno} at {:.2} pkts/s", speed);
+                    log::debug!("RETRANSMIT {seqno} at {:.2} pkts/s", speed);
                     outgoing_callback(first);
                     continue;
                 }
@@ -411,7 +413,7 @@ impl StreamState {
                 outgoing_callback(msg);
                 self.last_write_time = now;
                 writes_allowed -= 1;
-                log::debug!("pacing {seqno} at {:.2} pkts/s", speed);
+                log::debug!("{seqno} at {:.2} pkts/s", speed);
                 continue;
             }
 
