@@ -260,7 +260,7 @@ impl StreamState {
                         self.rtt_count += 1;
                         let multipliers = [1.25, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
                         self.speed_gain = multipliers[self.rtt_count as usize % multipliers.len()];
-                        self.cwnd = self.inflight.bdp() as f64 * 2.0;
+                        self.cwnd = (self.inflight.bdp() as f64 * 2.0).max(10.0);
                     }
 
                     log::debug!(
