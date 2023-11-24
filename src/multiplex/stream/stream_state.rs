@@ -367,13 +367,13 @@ impl StreamState {
 
         // speed here is calculated based on the idea that we should be able to transmit a whole cwnd of things in an rtt.
         let speed = self.speed();
+        let delivery_rate = self.inflight.delivery_rate();
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
             .as_secs_f64()
             * speed) as usize;
 
         while !self.congested(now) && writes_allowed > 0 {
-            log::debug!("writes_allowed = {writes_allowed}");
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
@@ -387,7 +387,11 @@ impl StreamState {
                     let first = self.inflight.retransmit(seqno).expect("no first");
                     self.last_write_time = now;
                     writes_allowed -= 1;
-                    log::debug!("RETRANSMIT {seqno} at {:.2} pkts/s", speed);
+                    log::debug!(
+                        "RETRANSMIT {seqno} at {:.2} pkts/s, delivered {:.2}",
+                        speed,
+                        delivery_rate
+                    );
                     outgoing_callback(first);
                     continue;
                 }
@@ -413,7 +417,11 @@ impl StreamState {
                 outgoing_callback(msg);
                 self.last_write_time = now;
                 writes_allowed -= 1;
-                log::debug!("{seqno} at {:.2} pkts/s", speed);
+                log::debug!(
+                    "{seqno} at {:.2} pkts/s, delivered {:.2}",
+                    speed,
+                    delivery_rate
+                );
                 continue;
             }
 
