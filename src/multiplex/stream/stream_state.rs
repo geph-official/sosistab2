@@ -423,7 +423,7 @@ impl StreamState {
     }
 
     fn speed(&self) -> f64 {
-        self.inflight.delivery_rate() * self.speed_gain
+        (self.inflight.delivery_rate() * self.speed_gain).max(10.0)
     }
 
     fn retick_time(&self, now: Instant) -> Instant {
