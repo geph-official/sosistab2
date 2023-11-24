@@ -47,8 +47,10 @@ pub struct StreamState {
     // write variables
     inflight: Inflight,
     next_write_seqno: u64,
+    rtt_count: u64,
+    last_rtt_count_time: Instant,
     cwnd: f64,
-    ssthresh: f64,
+    speed_gain: f64,
 
     in_recovery: bool,
     last_write_time: Instant,
@@ -109,9 +111,13 @@ impl StreamState {
             reorderer: Reorderer::default(),
             inflight: Inflight::new(),
             next_write_seqno: 0,
-            cwnd: 4.0,
-            ssthresh: 0.0,
             tick_notify,
+
+            cwnd: 10.0,
+            speed_gain: 2.0,
+
+            rtt_count: 0,
+            last_rtt_count_time: Instant::now(),
 
             in_recovery: false,
 
@@ -206,7 +212,7 @@ impl StreamState {
         }
     }
 
-    fn tick_read(&mut self, _now: Instant, mut outgoing_callback: impl FnMut(StreamMessage)) {
+    fn tick_read(&mut self, now: Instant, mut outgoing_callback: impl FnMut(StreamMessage)) {
         // Put all incoming packets into the reorderer.
         let mut to_ack = vec![];
         // log::debug!("processing incoming queue of {}", self.incoming_queue.len());
@@ -246,17 +252,15 @@ impl StreamState {
                         }
                     }
 
-                    // use BIC
-                    for _ in 0..ack_count {
-                        let bic_inc = if self.cwnd < self.ssthresh {
-                            (self.ssthresh - self.cwnd) / 2.0
-                        } else {
-                            self.cwnd - self.ssthresh
-                        }
-                        .max(1.0)
-                        .min(50.0)
-                        .min(self.cwnd);
-                        self.cwnd += bic_inc / self.cwnd;
+                    // BBR
+                    if now.saturating_duration_since(self.last_rtt_count_time)
+                        > self.inflight.min_rtt()
+                    {
+                        self.last_rtt_count_time = now;
+                        self.rtt_count += 1;
+                        let multipliers = [1.25, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+                        self.speed_gain = multipliers[self.rtt_count as usize % multipliers.len()];
+                        self.cwnd = self.inflight.bdp() as f64 * 2.0;
                     }
 
                     log::debug!(
@@ -320,19 +324,8 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd > 100.0 {
-            log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
-
-            // BIC
-            let beta = 0.15;
-            if self.cwnd < self.ssthresh {
-                self.ssthresh = self.cwnd * (2.0 - beta) / 2.0;
-            } else {
-                self.ssthresh = self.cwnd;
-            }
-
-            self.cwnd *= 1.0 - beta;
-            self.cwnd = self.cwnd.max(1.0);
+        if !self.in_recovery {
+            log::debug!("*** LOSS AT CWND = {}", self.cwnd);
 
             self.in_recovery = true;
         }
@@ -430,7 +423,7 @@ impl StreamState {
     }
 
     fn speed(&self) -> f64 {
-        (self.cwnd / self.inflight.min_rtt().as_secs_f64()).max(1.0)
+        self.inflight.delivery_rate() * self.speed_gain
     }
 
     fn retick_time(&self, now: Instant) -> Instant {
