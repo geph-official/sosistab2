@@ -385,6 +385,7 @@ impl StreamState {
                     );
                     log::debug!("*** retransmit {}", seqno);
                     let first = self.inflight.retransmit(seqno).expect("no first");
+                    self.last_write_time = now;
                     writes_allowed -= 1;
                     log::debug!("RETRANSMIT {seqno} at {:.2} pkts/s", speed);
                     outgoing_callback(first);
