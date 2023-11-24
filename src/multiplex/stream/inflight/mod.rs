@@ -110,9 +110,9 @@ impl Inflight {
             if acked_seg.retrans == 0 {
                 self.rtt
                     .record_sample(now.saturating_duration_since(acked_seg.send_time));
+                // record bandwidth
+                self.bw.on_ack(acked_seg.delivered, acked_seg.send_time);
             }
-            // record bandwidth
-            self.bw.on_ack(acked_seg.delivered, acked_seg.send_time);
             // remove from rtos
             self.remove_rto(acked_seg.retrans_time, acked_seqno);
 
