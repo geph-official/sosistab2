@@ -320,7 +320,7 @@ impl StreamState {
     }
 
     fn start_recovery(&mut self) {
-        if !self.in_recovery && self.cwnd > self.inflight.bdp() as f64 {
+        if !self.in_recovery && self.cwnd > 100 {
             log::debug!("*** START RECOVRY AT CWND = {}", self.cwnd);
 
             // BIC
@@ -366,7 +366,7 @@ impl StreamState {
         }
 
         // speed here is calculated based on the idea that we should be able to transmit a whole cwnd of things in an rtt.
-        let speed = (self.speed() * 1.2).max(self.inflight.delivery_rate());
+        let speed = self.speed();
         let mut writes_allowed = (now
             .saturating_duration_since(self.last_write_time)
             .as_secs_f64()
