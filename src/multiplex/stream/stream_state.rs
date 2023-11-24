@@ -373,6 +373,7 @@ impl StreamState {
             * speed) as usize;
 
         while !self.congested(now) && writes_allowed > 0 {
+            log::debug!("writes_allowed = {writes_allowed}");
             // we do any retransmissions if necessary
             if let Some((seqno, retrans_time)) = self.inflight.first_rto() {
                 if now >= retrans_time {
