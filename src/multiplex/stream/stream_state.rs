@@ -49,8 +49,10 @@ pub struct StreamState {
     next_write_seqno: u64,
     rtt_count: u64,
     last_rtt_count_time: Instant,
+    last_rate: f64,
     cwnd: f64,
     speed_gain: f64,
+    probing: bool,
 
     in_recovery: bool,
     last_write_time: Instant,
@@ -115,6 +117,8 @@ impl StreamState {
 
             cwnd: 10.0,
             speed_gain: 2.0,
+            last_rate: 0.0,
+            probing: true,
 
             rtt_count: 0,
             last_rtt_count_time: Instant::now(),
@@ -256,11 +260,28 @@ impl StreamState {
                     if now.saturating_duration_since(self.last_rtt_count_time)
                         > self.inflight.min_rtt()
                     {
-                        self.last_rtt_count_time = now;
-                        self.rtt_count += 1;
-                        let multipliers = [1.25, 0.75];
-                        self.speed_gain = multipliers[self.rtt_count as usize % multipliers.len()];
-                        self.cwnd = (self.inflight.bdp() as f64 * 2.0).max(10.0);
+                        if now.saturating_duration_since(self.last_rtt_count_time)
+                            > Duration::from_secs(30)
+                        {
+                            self.probing = true;
+                        }
+                        if !self.probing {
+                            self.last_rtt_count_time = now;
+                            self.rtt_count += 1;
+                            let multipliers = [1.25, 0.75];
+                            self.speed_gain =
+                                multipliers[self.rtt_count as usize % multipliers.len()];
+                            self.cwnd = (self.inflight.bdp() as f64 * 2.0).max(10.0);
+                        } else {
+                            let current_rate = self.inflight.delivery_rate();
+                            if current_rate <= self.last_rate {
+                                log::debug!("EXITING probing!");
+                                self.probing = false;
+                            } else {
+                                self.speed_gain = 2.0;
+                            }
+                            self.last_rate = current_rate;
+                        }
                     }
 
                     log::debug!(
