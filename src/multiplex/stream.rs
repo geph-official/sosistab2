@@ -168,7 +168,7 @@ impl AsyncRead for Stream {
                         .wait_until(move || {
                             let mut inner = inner.lock();
 
-                            if inner.read_stream.capacity() > inner.read_stream.len() * 4 {
+                            if inner.read_stream.capacity() > inner.read_stream.len() * 2 {
                                 inner.read_stream.shrink_to_fit();
                             }
                             if !inner.read_stream.is_empty() || inner.closed {
@@ -212,17 +212,17 @@ impl AsyncWrite for Stream {
         if self.write_ready_resolved {
             let write_ready = self.local_notify.clone();
             let inner = self.queues.clone();
-            // this waits until there's less than 1 MB waiting to be written. this produces the right backpressure
+            // this waits until there's less than 100 KB waiting to be written. this produces the right backpressure
             write_future = RecycleBox::into_pin(coerce_box!(RecycleBox::recycle_pinned(
                 write_future,
                 async move {
                     write_ready
                         .wait_until(move || {
                             let mut inner = inner.lock();
-                            if inner.write_stream.capacity() > inner.write_stream.len() * 4 {
+                            if inner.write_stream.capacity() > inner.write_stream.len() * 2 {
                                 inner.write_stream.shrink_to_fit();
                             }
-                            if inner.write_stream.len() <= 1_000_000 {
+                            if inner.write_stream.len() <= 100_000 {
                                 Some(())
                             } else {
                                 None

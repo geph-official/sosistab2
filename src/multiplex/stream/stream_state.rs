@@ -413,6 +413,8 @@ impl StreamState {
                 writes_allowed -= 1;
                 log::debug!("{seqno} at {:.2} pkts/s", speed);
                 continue;
+            } else {
+                queues.write_stream.shrink_to_fit();
             }
 
             break;
