@@ -12,7 +12,6 @@ use concurrent_queue::ConcurrentQueue;
 
 use futures_intrusive::sync::ManualResetEvent;
 use parking_lot::Mutex;
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use smol::{
     channel::{Receiver, Sender},
@@ -248,7 +247,7 @@ impl MuxSecret {
 
     /// Generate.
     pub fn generate() -> Self {
-        Self(x25519_dalek::StaticSecret::new(OsRng {}))
+        Self(x25519_dalek::StaticSecret::random())
     }
 
     /// Convert to a public key.
