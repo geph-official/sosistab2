@@ -1,116 +1,62 @@
 [package]
 name = "sosistab2"
 version = "0.10.20"
-authors = ["nullchinchilla <nullchinchilla@pm.me>", "Geph Project <contact@geph.io"]
+authors = [
+  "nullchinchilla <nullchinchilla@pm.me>",
+  "Geph Project <contact@geph.io",
+]
 edition = "2021"
-description="An obfuscated datagram transport for horrible networks"
-license="MPL-2.0"
-repository="https://github.com/geph-official/sosistab2"
-
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "An obfuscated datagram transport for horrible networks"
+license = "MPL-2.0"
+repository = "https://github.com/geph-official/sosistab2"
 
 [dependencies]
-
-smol= "1.3.0"
-
-x25519-dalek={ version = "1.1.1", features = ["serde"] }
-serde={ version = "1.0.148", features = ["derive", "rc"] }
-# bytes={ version = "1.0.0", features = ["serde"] }
-blake3= {version="1"}
-rand= "0.7.3"
-event-listener= "2.5.3"
-futures-util = "0.3.25"
-parking_lot= "0.12"
-# governor= "0.3.1"
-
-once_cell = "1.16.0"
-
-num_cpus= "1.14.0"
-
-anyhow= "1.0.66"
-scopeguard= "1.1.0"
-
-indexmap= "1.9.2"
-
-concurrent-queue= "1.2.4"
-rand_chacha= "0.2.2"
-smolscale= "0.4"
-
-async-trait= "0.1.59"
-dashmap= "5.4.0"
+smol = "2.0.0"
+x25519-dalek = { version = "2.0.1", features = [
+  "serde",
+  "static_secrets",
+  "getrandom",
+] }
+serde = { version = "1.0.202", features = ["derive", "rc"] }
+blake3 = "1"
+event-listener = "5.3.0"
+futures-util = "0.3.30"
+parking_lot = "0.12"
+once_cell = "1.19.0"
+anyhow = "1.0.83"
+concurrent-queue = "2.5.0"
+smolscale = "0.4"
+async-trait = "0.1.80"
 smol-timeout = "0.6.0"
-
-
-cached= "0.26.2"
-
-
-smallvec= "1.10.0"
-thiserror = "1.0.37"
-
-hex= "0.4.3"
-fastrand= "1.8.0"
-
-
-slab = "0.4.7"
-
-bytes={ version = "1.3.0", features = ["serde"] }
-pin-project= "1.0.12"
-
-
-log = "0.4.17"
-
-arrayref = "0.3.6"
-
-
-stdcode = "0.1.13"
-microsleep = { version = "0.1.14", optional = true }
-
-
-subtle = "2.4.1"
-
-derivative = "2.2.0"
-
-itertools = "0.10.5"
-
-
-replay_filter = {version = "0.1", path="lib/replay_filter"}
-ahash = {version="0.8.3", features=["serde"]}
-
-async-event = "0.1.0"
-diatomic-waker = "0.1.0"
+thiserror = "1.0.60"
+fastrand = "2.1.0"
+bytes = { version = "1.6.0", features = ["serde"] }
+pin-project = "1.1.5"
+log = "0.4.21"
+arrayref = "0.3.7"
+stdcode = "0.1.14"
+replay_filter = { version = "0.1", path = "lib/replay_filter" }
+ahash = { version = "0.8.11", features = ["serde"] }
+async-event = "0.2.0"
 recycle-box = "0.2.0"
 futures-intrusive = "0.5.0"
-clone-macro = "0.1.0" 
 chacha20poly1305 = "0.10.1"
-
+clone-macro = "0.1.0"
 
 [profile.dev]
-# panic="abort"
-opt-level=1
+opt-level = 1
 
 [profile.release-dbg]
-inherits="release"
+inherits = "release"
 panic = "abort"
-debug=2
-
+debug = 2
 
 [profile.release]
 panic = "abort"
 
-
-
 [dev-dependencies]
-argh= "0.1.9"
-env_logger= "0.9.3"
-socksv5= "0.3.0"
-criterion = "0.3.6"
-rcgen = "0.10.0"
-dirs= "4.0.0"
-itertools = "0.10.5"
-
-
-
+env_logger = "0.11.3"
+criterion = "0.5.1"
 
 [[bench]]
 name = "my_benchmark"

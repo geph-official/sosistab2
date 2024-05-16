@@ -6,8 +6,6 @@ use anyhow::Context;
 use bytes::Bytes;
 use clone_macro::clone;
 use futures_intrusive::sync::ManualResetEvent;
-use rand::Rng;
-use rand_chacha::rand_core::OsRng;
 use replay_filter::ReplayFilter;
 use std::sync::Arc;
 use stdcode::StdcodeSerializeExt;
@@ -47,8 +45,8 @@ impl MultiplexState {
         local_lsk: MuxSecret,
         peer_lpk: Option<MuxPublic>,
     ) -> Self {
-        let local_esk_send = x25519_dalek::StaticSecret::new(OsRng {});
-        let local_esk_recv = x25519_dalek::StaticSecret::new(OsRng {});
+        let local_esk_send = x25519_dalek::StaticSecret::random();
+        let local_esk_recv = x25519_dalek::StaticSecret::random();
         Self {
             local_esk_send,
             local_esk_recv,
@@ -111,7 +109,7 @@ impl MultiplexState {
     /// Starts the opening of a connection, returning a Stream in the pending state.
     pub fn start_open_stream(&mut self, additional: &str) -> anyhow::Result<Stream> {
         for _ in 0..100 {
-            let stream_id: u16 = rand::thread_rng().gen();
+            let stream_id: u16 = fastrand::u16(..);
             if !self.stream_tab.contains_key(&stream_id) {
                 let (new_stream, handle) = StreamState::new_pending(
                     clone!([{ self.stream_tick_notify } as s], move || s.set()),

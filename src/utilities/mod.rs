@@ -3,7 +3,7 @@ use std::task::Poll;
 
 pub mod infallible;
 
-use futures_util::Future;
+use std::future::Future;
 
 impl<T: Future> MyFutureExt for T {}
 

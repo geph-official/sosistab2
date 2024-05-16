@@ -5,12 +5,9 @@ edition = "2021"
 description="A basic replay filter."
 license="MPL-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [target.'cfg(fuzzing)'.dependencies]
-
 honggfuzz = "0.5"
 
 [dependencies]
 bitvec = "1.0.1"
-log = "0.4.17"
+log = "0.4.21"

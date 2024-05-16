@@ -1,7 +1,7 @@
 use std::task::Poll;
 
-use futures_util::Future;
 use pin_project::pin_project;
+use std::future::Future;
 
 pub trait InfallibleExt<T, E, F: Future<Output = Result<T, E>>> {
     // what I really want is "async fn infallible() -> T"

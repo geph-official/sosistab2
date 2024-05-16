@@ -64,11 +64,11 @@ impl Stream {
         Self {
             tick_notify: Arc::new(tick_notify),
             read_ready_future: Some(RecycleBox::into_pin(coerce_box!(RecycleBox::new(async {
-                smol::future::pending().await
+                std::future::pending().await
             })))),
             read_ready_resolved: true, // forces redoing the future on first read
             write_ready_future: Some(RecycleBox::into_pin(coerce_box!(RecycleBox::new(async {
-                smol::future::pending().await
+                std::future::pending().await
             })))),
             write_ready_resolved: true, // forces redoing the future on first write
             local_notify: ready,
