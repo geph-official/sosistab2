@@ -1,9 +1,9 @@
 use arrayref::array_ref;
 
 use bytes::Bytes;
-use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce};
+use once_cell::sync::Lazy;
 
-use chacha20poly1305::AeadInPlace;
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -11,25 +11,26 @@ use std::sync::{
 use thiserror::Error;
 
 /// Non-obfuscated AEAD, with a straightforward counting nonce.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NonObfsAead {
-    key: Arc<ChaCha20Poly1305>,
+    key: Arc<LessSafeKey>,
     nonce: Arc<AtomicU64>,
 }
 
+static SOSISTAB_NOCRYPT: Lazy<bool> = Lazy::new(|| std::env::var("SOSISTAB_NOCRYPT").is_ok());
+
 impl NonObfsAead {
-    pub fn new(key: &[u8; 32]) -> Self {
-        let aead_key = Key::from_slice(key);
-        let aead = ChaCha20Poly1305::new(aead_key);
+    pub fn new(key: &[u8]) -> Self {
+        let ubk = UnboundKey::new(&CHACHA20_POLY1305, key).unwrap();
         Self {
-            key: Arc::new(aead),
+            key: Arc::new(LessSafeKey::new(ubk)),
             nonce: Arc::new(AtomicU64::new(0)),
         }
     }
 
     /// Returns the overhead.
     pub fn overhead() -> usize {
-        12 + 16 // 12-byte nonce + 16-byte tag
+        12 + CHACHA20_POLY1305.tag_len()
     }
 
     /// Encrypts a message, returning the ciphertext .
@@ -37,33 +38,46 @@ impl NonObfsAead {
         let nonce = self.nonce.fetch_add(1, Ordering::SeqCst);
         let mut bnonce = [0; 12];
         bnonce[..8].copy_from_slice(&nonce.to_le_bytes());
-        let nonce = Nonce::from_slice(&bnonce);
 
         // make an output. it starts out containing the plaintext.
-        let mut output = Vec::with_capacity(msg.len() + Self::overhead());
+        let mut output = Vec::with_capacity(msg.len() + 32);
         output.extend_from_slice(msg);
 
         // now we overwrite it
-        self.key.encrypt_in_place(nonce, b"", &mut output).unwrap();
-
+        if !*SOSISTAB_NOCRYPT {
+            self.key
+                .seal_in_place_append_tag(
+                    Nonce::assume_unique_for_key(bnonce),
+                    Aad::empty(),
+                    &mut output,
+                )
+                .unwrap();
+        }
         output.extend_from_slice(&bnonce);
         output.into()
     }
 
     /// Decrypts a message.
     pub fn decrypt(&self, ctext: &[u8]) -> Result<(u64, Bytes), AeadError> {
-        if ctext.len() < Self::overhead() {
+        if !*SOSISTAB_NOCRYPT && ctext.len() < 8 + CHACHA20_POLY1305.tag_len() {
             return Err(AeadError::BadLength);
         }
         // nonce is last 12 bytes
         let (cytext, nonce) = ctext.split_at(ctext.len() - 12);
         // we now open
         let mut ctext = cytext.to_vec();
-        self.key
-            .decrypt_in_place(Nonce::from_slice(nonce), b"", &mut ctext)
-            .ok()
-            .ok_or(AeadError::DecryptionFailure)?;
-
+        if !*SOSISTAB_NOCRYPT {
+            self.key
+                .open_in_place(
+                    Nonce::try_assume_unique_for_key(nonce).unwrap(),
+                    Aad::empty(),
+                    &mut ctext,
+                )
+                .ok()
+                .ok_or(AeadError::DecryptionFailure)?;
+            let truncate_to = ctext.len() - CHACHA20_POLY1305.tag_len();
+            ctext.truncate(truncate_to);
+        }
         let nonce = u64::from_le_bytes(*array_ref![nonce, 0, 8]);
         Ok((nonce, ctext.into()))
     }
