@@ -64,6 +64,17 @@ impl MultiplexState {
 
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
     pub fn tick(&mut self, mut raw_callback: impl FnMut(Frame)) -> Instant {
+        let start = Instant::now();
+        let stream_tab_len = self.stream_tab.len();
+        scopeguard::defer!({
+            if fastrand::f64() < 0.01 {
+                eprintln!(
+                    "ticking {} states took {:?}",
+                    stream_tab_len,
+                    start.elapsed()
+                );
+            }
+        });
         // encryption
         let mut outgoing_callback = |msg: StreamMessage| {
             log::trace!("send in tick {:?}", msg);
