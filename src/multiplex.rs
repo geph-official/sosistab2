@@ -199,18 +199,9 @@ async fn tick_loop(
         // this is also the basis for the brand of delayed-ack handling we do
         timer.set_at(Instant::now() + Duration::from_millis(20));
         (&mut timer).await;
-        timer.set_at(next_tick);
-        // horrifying hax
-        async {
-            stream_update.wait().await;
-            stream_update.reset();
-            log::trace!("update woken");
-        }
-        .or(async {
-            (&mut timer).await;
-            log::trace!("timer woken");
-        })
-        .await;
+        // timer.set_at(next_tick);
+        // // horrifying hax
+        // (&mut timer).await;
     }
 }
 
