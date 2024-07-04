@@ -1,11 +1,16 @@
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    cmp::Reverse,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use ahash::AHashMap;
 use anyhow::Context;
 
 use bytes::Bytes;
 use clone_macro::clone;
+use crossbeam_queue::SegQueue;
 use futures_intrusive::sync::ManualResetEvent;
+use priority_queue::PriorityQueue;
 use rand::Rng;
 use rand_chacha::rand_core::OsRng;
 use replay_filter::ReplayFilter;
@@ -38,6 +43,8 @@ pub struct MultiplexState {
     stream_tab: AHashMap<u16, StreamState>,
     // notify this when the streams need to be rescanned
     stream_tick_notify: Arc<ManualResetEvent>,
+    force_ticks: Arc<SegQueue<u16>>,
+    tick_times: PriorityQueue<u16, Reverse<Instant>>,
 }
 
 impl MultiplexState {
@@ -58,12 +65,27 @@ impl MultiplexState {
             local_lsk,
             peer_lpk,
             stream_tab: AHashMap::new(),
+            force_ticks: Arc::new(SegQueue::new()),
             stream_tick_notify: stream_update,
+            tick_times: PriorityQueue::new(),
         }
     }
 
     /// "Ticks" the state forward once. Returns the time before which this method should be called again.
     pub fn tick(&mut self, mut raw_callback: impl FnMut(Frame)) -> Instant {
+        // if we do not have a send_aead, we send a hello and wait a second
+        if self.send_aead.is_none() {
+            let hello = Frame::ClientHello {
+                long_pk: self.local_lsk.to_public(),
+                eph_pk: (&self.local_esk_send).into(),
+                version: 1,
+                timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
+            };
+            log::debug!("no send aead, cannot send anything yet. sending another clienthello");
+            raw_callback(hello);
+            return Instant::now() + Duration::from_secs(1);
+        }
+
         let start = Instant::now();
         let stream_tab_len = self.stream_tab.len();
         scopeguard::defer!({
@@ -85,38 +107,27 @@ impl MultiplexState {
             }
         };
 
-        let mut to_delete = vec![];
-        // iterate through every stream, ticking it, finding the minimum of the instants
-        let insta = self
-            .stream_tab
-            .iter_mut()
-            .flat_map(|(k, stream)| {
-                let v = stream.tick(&mut outgoing_callback);
-                if v.is_none() {
-                    to_delete.push(*k);
-                }
-                v
-            })
-            .min();
-
-        for i in to_delete {
-            self.stream_tab.remove(&i);
+        // push the force-ticks into the tick queue
+        while let Some(val) = self.force_ticks.pop() {
+            self.tick_times.push(val, Reverse(start));
+        }
+        // tick only the streams that need to be ticked
+        while let Some((stream_id, Reverse(time))) = self.tick_times.pop() {
+            if time > start {
+                self.tick_times.push(stream_id, Reverse(time));
+                break;
+            }
+            let stream = self.stream_tab.get_mut(&stream_id).unwrap();
+            if let Some(next_time) = stream.tick(&mut outgoing_callback) {
+                self.tick_times.push(stream_id, Reverse(next_time));
+            } else {
+                self.tick_times.remove(&stream_id);
+                self.stream_tab.remove(&stream_id);
+            }
         }
 
-        // if we do not have a send_aead, we send a hello and wait a second
-        if self.send_aead.is_none() {
-            let hello = Frame::ClientHello {
-                long_pk: self.local_lsk.to_public(),
-                eph_pk: (&self.local_esk_send).into(),
-                version: 1,
-                timestamp: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()).as_secs(),
-            };
-            log::debug!("no send aead, cannot send anything yet. sending another clienthello");
-            raw_callback(hello);
-            Instant::now() + Duration::from_secs(1)
-        } else {
-            insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
-        }
+        let insta = self.tick_times.peek().map(|(_, time)| time.0);
+        insta.unwrap_or_else(|| Instant::now() + Duration::from_secs(86400))
     }
 
     /// Starts the opening of a connection, returning a Stream in the pending state.
@@ -124,12 +135,18 @@ impl MultiplexState {
         for _ in 0..100 {
             let stream_id: u16 = rand::thread_rng().gen();
             if !self.stream_tab.contains_key(&stream_id) {
+                let stream_tick_notify = self.stream_tick_notify.clone();
+                let force_ticks = self.force_ticks.clone();
                 let (new_stream, handle) = StreamState::new_pending(
-                    clone!([{ self.stream_tick_notify } as s], move || s.set()),
+                    move || {
+                        force_ticks.push(stream_id);
+                        stream_tick_notify.set();
+                    },
                     stream_id,
                     additional.to_owned(),
                 );
                 self.stream_tab.insert(stream_id, new_stream);
+                self.force_ticks.push(stream_id);
                 self.stream_tick_notify.set();
                 return Ok(handle);
             }

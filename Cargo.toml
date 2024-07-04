@@ -84,6 +84,8 @@ diatomic-waker = "0.1.0"
 recycle-box = "0.2.0"
 futures-intrusive = "0.5.0"
 clone-macro = "0.1.0"
+priority-queue = "2.0.3"
+crossbeam-queue = "0.3.11"
 
 
 [profile.dev]
