@@ -196,7 +196,7 @@ async fn tick_loop(
         }
         // sleep first to prevent too aggressively looping around
         // this is also the basis for the brand of delayed-ack handling we do
-        timer.set_at(Instant::now() + Duration::from_millis(50));
+        timer.set_at(Instant::now() + Duration::from_millis(10));
         (&mut timer).await;
         timer.set_at(next_tick);
         // horrifying hax
