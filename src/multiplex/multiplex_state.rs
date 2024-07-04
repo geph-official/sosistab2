@@ -150,7 +150,6 @@ impl MultiplexState {
                     additional.to_owned(),
                 );
                 self.stream_tab.insert(stream_id, new_stream);
-                self.force_ticks.push(stream_id);
                 self.stream_tick_notify.set();
                 return Ok(handle);
             }
@@ -226,16 +225,22 @@ impl MultiplexState {
                         seqno: _,
                         payload,
                     } => {
-                        if let Some(stream) = self.stream_tab.get_mut(stream_id) {
+                        let stream_id = *stream_id;
+                        if let Some(stream) = self.stream_tab.get_mut(&stream_id) {
                             stream.inject_incoming(inner);
                         } else {
+                            let stream_tick_notify = self.stream_tick_notify.clone();
+                            let force_ticks = self.force_ticks.clone();
                             // create a new stream in the right state. we don't need to do anything else
                             let (mut stream, handle) = StreamState::new_established(
-                                clone!([{ self.stream_tick_notify } as s], move || s.set()),
-                                *stream_id,
+                                move || {
+                                    force_ticks.push(stream_id);
+                                    stream_tick_notify.set();
+                                },
+                                stream_id,
                                 String::from_utf8_lossy(payload).to_string(),
                             );
-                            let stream_id = *stream_id;
+
                             stream.inject_incoming(inner); // this creates the syn-ack
                             self.stream_tab.insert(stream_id, stream);
                             accept_callback(handle);
