@@ -113,7 +113,9 @@ impl MultiplexState {
 
         // push the force-ticks into the tick queue
         while let Some(val) = self.force_ticks.pop() {
-            self.tick_times.push(val, Reverse(start));
+            if self.stream_tab.contains_key(&val) {
+                self.tick_times.push(val, Reverse(start));
+            }
         }
         // tick only the streams that need to be ticked
         while let Some((stream_id, Reverse(time))) = self.tick_times.pop() {
@@ -121,16 +123,15 @@ impl MultiplexState {
                 self.tick_times.push(stream_id, Reverse(time));
                 break;
             }
-            let stream = self.stream_tab.get_mut(&stream_id);
-            if let Some(stream) = stream {
-                if let Some(next_time) = stream.tick(&mut outgoing_callback) {
-                    self.tick_times.push(stream_id, Reverse(next_time));
-                } else {
-                    self.tick_times.remove(&stream_id);
-                    self.stream_tab.remove(&stream_id);
-                }
+            let stream = self
+                .stream_tab
+                .get_mut(&stream_id)
+                .expect("inconsistency between stream table and tick time table");
+            if let Some(next_time) = stream.tick(&mut outgoing_callback) {
+                self.tick_times.push(stream_id, Reverse(next_time));
             } else {
-                log::error!("**** FOR WHATEVER REASON {stream_id} NOT IN TAB ****");
+                self.tick_times.remove(&stream_id);
+                self.stream_tab.remove(&stream_id);
             }
         }
 
