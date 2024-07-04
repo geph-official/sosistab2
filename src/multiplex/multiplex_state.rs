@@ -121,12 +121,16 @@ impl MultiplexState {
                 self.tick_times.push(stream_id, Reverse(time));
                 break;
             }
-            let stream = self.stream_tab.get_mut(&stream_id).unwrap();
-            if let Some(next_time) = stream.tick(&mut outgoing_callback) {
-                self.tick_times.push(stream_id, Reverse(next_time));
+            let stream = self.stream_tab.get_mut(&stream_id);
+            if let Some(stream) = stream {
+                if let Some(next_time) = stream.tick(&mut outgoing_callback) {
+                    self.tick_times.push(stream_id, Reverse(next_time));
+                } else {
+                    self.tick_times.remove(&stream_id);
+                    self.stream_tab.remove(&stream_id);
+                }
             } else {
-                self.tick_times.remove(&stream_id);
-                self.stream_tab.remove(&stream_id);
+                log::error!("**** FOR WHATEVER REASON {stream_id} NOT IN TAB ****");
             }
         }
 
