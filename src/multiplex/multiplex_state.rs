@@ -87,20 +87,7 @@ impl MultiplexState {
         }
 
         let start = Instant::now();
-        let stream_tab_len = self.stream_tab.len();
-        let pending_len = self.tick_times.len();
-        let forced_len = self.force_ticks.len();
-        scopeguard::defer!({
-            if fastrand::f64() < 0.01 {
-                eprintln!(
-                    "ticking {} states, {} pending, {} forced took {:?}",
-                    stream_tab_len,
-                    pending_len,
-                    forced_len,
-                    start.elapsed()
-                );
-            }
-        });
+
         // encryption
         let mut outgoing_callback = |msg: StreamMessage| {
             log::trace!("send in tick {:?}", msg);
